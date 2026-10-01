@@ -23,16 +23,20 @@
 }
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
-html, body { margin: 0; min-height: 100%; }
+html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; }
 body {
   background: var(--desk);
   color: var(--ink);
   font: 13px/1.35 var(--ui);
-  padding: 16px;
+  padding: 0;
 }
 .window {
-  max-width: 1080px;
-  margin: 0 auto;
+  width: 100%;
+  height: 100vh;
+  height: 100dvh;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
   background: var(--face);
   border: 2px solid;
   border-color: var(--hi) var(--dark) var(--dark) var(--hi);
@@ -72,10 +76,11 @@ label.inline { display: inline-flex; gap: 4px; align-items: center; }
   border: 2px solid;
   border-color: var(--shadow) var(--hi) var(--hi) var(--shadow);
   background: var(--dark);
-  overflow: auto;
+  overflow: hidden;
   position: relative;
-  min-height: 240px;
-  display: flex; justify-content: safe center; align-items: flex-start;
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex; justify-content: center; align-items: center;
 }
 #screen_container { display: inline-block; line-height: 0; }
 #screen_container > div { white-space: pre; font: 14px/14px var(--mono); color: #fff; line-height: 14px; }
@@ -109,9 +114,6 @@ label.inline { display: inline-flex; gap: 4px; align-items: center; }
   padding: 2px 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   font-variant-numeric: tabular-nums;
 }
-.notes { max-width: 1080px; margin: 12px auto 0; color: var(--hi); font-size: 12px; }
-.notes p { margin: 4px 0; max-width: 90ch; }
-.notes a { color: var(--hi); }
 </style>
 </head>
 <body>
@@ -179,11 +181,6 @@ label.inline { display: inline-flex; gap: 4px; align-items: center; }
     <div id="st_disk">Disk: none</div>
   </div>
 </main>
-
-<section class="notes">
-  <p>Same machine as copy.sh/v86/?profile=windows95: Pentium-class CPU, 64 MB RAM, 8 MB VGA, SeaBIOS. Disk reads stream on demand, so the first boot takes a minute. Changes stay in memory until you close the tab; use <em>Save state</em> to keep a snapshot file and <em>Restore state</em> to load it later.</p>
-  <p>Click the screen to type. Use <em>Lock mouse</em> for games and drawing; press Esc to release. Emulator: <a href="https://github.com/copy/v86" target="_blank" rel="noopener">v86</a> (BSD-2-Clause).</p>
-</section>
 
 <script src="build/libv86.js"></script>
 <script>
@@ -320,13 +317,13 @@ label.inline { display: inline-flex; gap: 4px; align-items: center; }
     let s;
     if (!emulator) return;
     if (v === "fit") {
-      // Text mode keeps its native size; graphics modes grow to fill the window (max 2x).
+      // Text mode keeps its native size; graphics modes use the available pane.
       const w = canvas.style.display === "none" ? 0 : canvas.width;
       const h = canvas.style.display === "none" ? 0 : canvas.height;
       const well = $("well");
       const availW = well.clientWidth - 4;
-      const availH = document.fullscreenElement ? well.clientHeight : Math.max(240, window.innerHeight - 220);
-      s = (w && h) ? Math.min(availW / w, availH / h, 2) : 1;
+      const availH = well.clientHeight - 4;
+      s = (w && h) ? Math.min(availW / w, availH / h) : 1;
       if (!(s > 0)) s = 1;
     } else {
       s = parseFloat(v);
