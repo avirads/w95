@@ -14,6 +14,24 @@ On Fastium, v86's `windows95-v3` profile image is mirrored as 1,800 local
 `mirror-v86-win95.sh` script downloads and validates that image. There is no
 manual disk picker. The image is not included in this repository.
 
+## Networking
+
+The title-bar Network selector reboots the VM when changed. **Internet** (the
+default) requests a short-lived, origin-bound session from Fastium's existing
+`/v1/sessions` gateway and carries raw NE2000 Ethernet frames over
+`/v1/ethernet`. The gateway blocks private and metadata-address egress by
+default. This mode requires the gateway routes and allowed origin; it will show
+an error instead of silently booting without networking if unavailable. The
+public gateway currently permits one active VM network session at a time.
+
+**Browser-local** uses v86's `inbrowser` link. It connects VMs in tabs of the
+same browser/origin, but has no Internet, DHCP, or router. Configure static
+addresses in each guest on the same subnet (for example `192.168.42.10/24`
+and `192.168.42.11/24`) to communicate. A lone Windows 95 VM has no peer.
+
+Windows 95's bundled browser may not support modern TLS websites even when the
+network is connected. Use a plain HTTP test endpoint to validate reachability.
+
 ## Disk image
 
 Windows 95 is proprietary; confirm you have rights to host and use an image

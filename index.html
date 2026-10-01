@@ -53,6 +53,9 @@ body {
 .titlebar h1 { font-size: 13px; margin: 0; flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .titlebar .logo { width: 16px; height: 16px; flex: none; }
 .window-controls { display: flex; gap: 2px; margin-left: auto; }
+.network-choice { color: #fff; font: 11px var(--ui); white-space: nowrap; }
+.network-choice select { max-width: 118px; font: 11px var(--ui); }
+#network_status { font: 11px var(--ui); max-width: 145px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .window-controls button {
   font: inherit; color: var(--ink);
   background: var(--face);
@@ -105,6 +108,8 @@ body {
   <div class="titlebar">
     <svg class="logo" viewBox="0 0 16 16" aria-hidden="true"><rect x="1" y="1" width="6" height="6" fill="#f25022"/><rect x="9" y="1" width="6" height="6" fill="#7fba00"/><rect x="1" y="9" width="6" height="6" fill="#00a4ef"/><rect x="9" y="9" width="6" height="6" fill="#ffb900"/></svg>
     <h1>Windows 95 — v86 emulator</h1>
+    <label class="network-choice" for="network_mode">Network <select id="network_mode"><option value="internet">Internet</option><option value="local">Browser-local</option></select></label>
+    <span id="network_status" role="status" title="Network status">Connecting…</span>
     <div class="window-controls" aria-label="Window controls">
       <button id="minimize" type="button" aria-label="Minimize" title="Minimize">_</button>
       <button id="maximize" type="button" aria-label="Maximize" title="Maximize">□</button>
@@ -134,8 +139,52 @@ body {
   let emulator = null;
   let closed = false;
   let resumeAfterMinimize = false;
+  const mode = new URL(location.href).searchParams.get("network") === "local" ? "local" : "internet";
+  let networkSocket = null;
+  $("network_mode").value = mode;
+  $("network_mode").onchange = () => {
+    const url = new URL(location.href);
+    url.searchParams.set("network", $("network_mode").value);
+    location.assign(url);
+  };
 
-  function boot() {
+  function networkStatus(message) {
+    $("network_status").textContent = message;
+    $("network_status").title = message;
+  }
+
+  async function connectInternet() {
+    const response = await fetch("/v1/sessions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ttlSeconds: 3600 }),
+    });
+    if (!response.ok) throw new Error("session request failed (" + response.status + ")");
+    const session = await response.json();
+    if (session.active) throw new Error("gateway is in use by another VM");
+    const socket = new WebSocket("wss://" + location.host + "/v1/ethernet", "v86net." + session.token);
+    socket.binaryType = "arraybuffer";
+    await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error("gateway timeout")), 12000);
+      socket.onopen = () => { clearTimeout(timer); resolve(); };
+      socket.onerror = () => { clearTimeout(timer); reject(new Error("gateway connection failed")); };
+    });
+    networkSocket = socket;
+    networkStatus("Internet connected");
+    return socket;
+  }
+
+  async function boot() {
+    let socket = null;
+    if (mode === "internet") {
+      try { socket = await connectInternet(); }
+      catch (error) {
+        networkStatus("Internet unavailable");
+        $("boot_msg").textContent = error.message + ". Select Browser-local to continue.";
+        return;
+      }
+    } else networkStatus("Browser-local only");
+    if (closed) { socket?.close(); return; }
     emulator = new V86({
       wasm_path: "build/v86.wasm",
       screen_container: $("screen_container"),
@@ -150,8 +199,20 @@ body {
         fixed_chunk_size: 256 * 1024,
         use_parts: true,
       },
+      net_device: mode === "local" ? { type: "ne2k", relay_url: "inbrowser" } : { type: "ne2k" },
       autostart: true,
     });
+    if (socket) {
+      emulator.add_listener("net0-send", frame => {
+        if (socket.readyState === WebSocket.OPEN && socket.bufferedAmount < 1 << 20) socket.send(frame);
+      });
+      socket.onmessage = event => {
+        if (event.data instanceof ArrayBuffer && event.data.byteLength >= 14) {
+          emulator.bus.send("net0-receive", new Uint8Array(event.data));
+        }
+      };
+      socket.onclose = () => networkStatus("Internet disconnected — reload to reconnect");
+    }
     window.emulator = emulator;
     wire();
   }
@@ -215,6 +276,7 @@ body {
       try { await document.exitFullscreen(); } catch (_) { /* Continue closing. */ }
     }
     if (emulator?.is_running()) emulator.stop();
+    networkSocket?.close();
     $("window").hidden = true;
     $("closed").hidden = false;
   };
