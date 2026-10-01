@@ -161,7 +161,6 @@ body {
     });
     if (!response.ok) throw new Error("session request failed (" + response.status + ")");
     const session = await response.json();
-    if (session.active) throw new Error("gateway is in use by another VM");
     const socket = new WebSocket("wss://" + location.host + "/v1/ethernet", "v86net." + session.token);
     socket.binaryType = "arraybuffer";
     await new Promise((resolve, reject) => {

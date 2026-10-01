@@ -22,7 +22,8 @@ default) requests a short-lived, origin-bound session from Fastium's existing
 `/v1/ethernet`. The gateway blocks private and metadata-address egress by
 default. This mode requires the gateway routes and allowed origin; it will show
 an error instead of silently booting without networking if unavailable. The
-public gateway currently permits one active VM network session at a time.
+gateway permits one active VM network session at a time; each new connection
+takes the lease and disconnects the previous VM.
 
 **Browser-local** uses v86's `inbrowser` link. It connects VMs in tabs of the
 same browser/origin, but has no Internet, DHCP, or router. Configure static
