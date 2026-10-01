@@ -8,10 +8,17 @@ resolution in a status bar.
 
 It is a static site with no build step, so GitHub Pages can host it.
 
+On Fastium, v86's `windows95-v3` profile image is mirrored as 1,800 local
+256 KiB chunks under `images/windows95-v3/` and boots automatically. The
+`mirror-v86-win95.sh` script downloads and validates that image. Add
+`?manual=1` to show the disk picker instead. The image is not included in
+this repository.
+
 ## Disk image
 
-The page does not ship Windows 95. copy.sh's image CDN (`i.copy.sh`) refuses requests from
-other sites, so you supply your own licensed image in one of three ways:
+Windows 95 is proprietary; confirm you have rights to host and use an image
+before running the mirror script. The Git repository does not include a disk
+image. Without the Fastium mirror, use `?manual=1` and supply an image:
 
 | How | What to do |
 | --- | --- |
@@ -27,6 +34,7 @@ To make a chunked mirror from an image: `split -b 262144 -d` and rename the part
 - `index.html`: the page and controls
 - `build/`: `libv86.js`, `v86.wasm` from the `v86` npm package 0.5.465 (BSD-2-Clause, see `build/LICENSE.v86`)
 - `bios/`: SeaBIOS and the VGA BIOS from the v86 repository
+- `mirror-v86-win95.sh`: reproducible downloader and size checks for the Fastium mirror
 
 ## Run locally
 

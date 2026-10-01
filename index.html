@@ -156,6 +156,7 @@ label.inline { display: inline-flex; gap: 4px; align-items: center; }
     <div class="boot" id="boot">
       <div id="picker" class="picker">
         <p><strong>Start Windows 95</strong></p>
+        <p id="boot_error" class="hint" hidden></p>
         <p>Pick the Windows 95 hard disk image to boot. It runs entirely in this tab; nothing is uploaded.</p>
         <label class="filebtn" for="hda_file">Open disk image (.img)…<input id="hda_file" type="file" accept=".img,.ima,.vhd,.raw,application/octet-stream"></label>
         <form id="url_form" class="urlrow">
@@ -231,6 +232,14 @@ label.inline { display: inline-flex; gap: 4px; align-items: center; }
     }, "450 MB, streamed from mirror");
   } else if (params.get("hda")) {
     $("hda_url").value = params.get("hda");
+  } else if (params.get("manual") !== "1") {
+    boot({
+      url: "images/windows95-v3/.img",
+      size: 471859200,
+      async: true,
+      fixed_chunk_size: 256 * 1024,
+      use_parts: true,
+    }, "Windows 95 (server image)");
   }
 
   const controls = ["btn_pause", "btn_reset", "btn_cad", "btn_alttab", "btn_win", "btn_mouse", "btn_full", "btn_shot", "btn_save"];
@@ -245,7 +254,10 @@ label.inline { display: inline-flex; gap: 4px; align-items: center; }
     $("boot_msg").textContent = "Downloading " + name + " (" + (e.file_index + 1) + " of " + e.file_count + ")" + (e.total ? " — " + pct + "%" : "");
   });
   emulator.add_listener("download-error", (e) => {
-    $("boot_msg").textContent = "Could not download " + (e.file_name || "a file") + ". Check your connection and reload the page.";
+    $("boot_error").textContent = "Could not load the server image. Choose a local disk or enter another URL.";
+    $("boot_error").hidden = false;
+    $("progress").hidden = true;
+    $("picker").hidden = false;
     $("st_state").textContent = "State: download error";
   });
   emulator.add_listener("emulator-ready", () => {
