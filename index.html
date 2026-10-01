@@ -6,7 +6,7 @@
 <title>Windows 95 in the Browser</title>
 <meta name="description" content="Windows 95 running in your browser on the v86 x86 emulator — the same setup as copy.sh/v86/?profile=windows95.">
 <style>
-/* Layout: one Win95-style window frame holding the emulator screen, a toolbar above it, a status bar below. */
+/* A single Win95-style window fills the browser pane. */
 :root {
   --desk: #008080;          /* the classic teal desktop */
   --face: #c0c0c0;          /* 3D button face */
@@ -16,7 +16,6 @@
   --title-a: #000080;       /* active title bar */
   --title-b: #1084d0;
   --ink: #000000;
-  --muted: #404040;
   --ui: "Tahoma", "MS Sans Serif", "Segoe UI", system-ui, sans-serif;
   --mono: "Courier New", ui-monospace, monospace;
   color-scheme: light;
@@ -48,43 +47,41 @@ body {
   background: linear-gradient(90deg, var(--title-a), var(--title-b));
   color: var(--hi);
   font-weight: bold;
-  padding: 3px 4px;
+  padding: 2px 3px;
+  min-height: 24px;
 }
 .titlebar h1 { font-size: 13px; margin: 0; flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .titlebar .logo { width: 16px; height: 16px; flex: none; }
-.toolbar { display: flex; flex-wrap: wrap; gap: 4px; padding: 6px 2px; align-items: center; }
-.sep { width: 2px; align-self: stretch; border-left: 1px solid var(--shadow); border-right: 1px solid var(--hi); margin: 0 3px; }
-button, .filebtn {
+.window-controls { display: flex; gap: 2px; margin-left: auto; }
+.window-controls button {
   font: inherit; color: var(--ink);
   background: var(--face);
   border: 2px solid;
   border-color: var(--hi) var(--dark) var(--dark) var(--hi);
   box-shadow: inset -1px -1px 0 var(--shadow), inset 1px 1px 0 #dfdfdf;
-  padding: 3px 10px; min-height: 26px; cursor: pointer;
+  width: 22px; height: 19px; padding: 0; line-height: 14px; cursor: pointer;
+  font-size: 14px; font-weight: bold;
 }
-button:active, .filebtn:active, button[aria-pressed="true"] {
+.window-controls button:active {
   border-color: var(--dark) var(--hi) var(--hi) var(--dark);
   box-shadow: inset 1px 1px 0 var(--shadow);
 }
-button:disabled { color: var(--shadow); text-shadow: 1px 1px 0 var(--hi); cursor: default; }
-button:focus-visible, .filebtn:focus-within { outline: 1px dotted var(--ink); outline-offset: -5px; }
-.filebtn input { position: absolute; width: 1px; height: 1px; opacity: 0; }
-select { font: inherit; min-height: 26px; }
-label.inline { display: inline-flex; gap: 4px; align-items: center; }
+.window-controls button:focus-visible { outline: 1px dotted var(--ink); outline-offset: -5px; }
+.window.minimized { position: absolute; bottom: 0; left: 0; width: min(300px, 100%); height: auto; }
+.window.minimized .screen-well { display: none; }
+#closed { position: absolute; inset: 0; display: grid; place-items: center; color: #fff; font-weight: bold; }
 
 .screen-well {
-  border: 2px solid;
-  border-color: var(--shadow) var(--hi) var(--hi) var(--shadow);
   background: var(--dark);
   overflow: hidden;
   position: relative;
   flex: 1 1 auto;
   min-height: 0;
-  display: flex; justify-content: center; align-items: center;
+  display: block;
 }
-#screen_container { display: inline-block; line-height: 0; }
+#screen_container { position: absolute; inset: 0; width: 100%; height: 100%; line-height: 0; overflow: hidden; }
 #screen_container > div { white-space: pre; font: 14px/14px var(--mono); color: #fff; line-height: 14px; }
-#screen_container canvas { display: block; image-rendering: pixelated; }
+#screen_container canvas { display: block; position: absolute; inset: 0; width: 100% !important; height: 100% !important; image-rendering: pixelated; }
 
 .boot {
   position: absolute; inset: 0;
@@ -100,52 +97,19 @@ label.inline { display: inline-flex; gap: 4px; align-items: center; }
 .meter span { display: block; height: 100%; width: 0; background: repeating-linear-gradient(90deg, var(--title-a) 0 10px, transparent 10px 12px); transition: width .2s; }
 @media (prefers-reduced-motion: reduce) { .meter span { transition: none; } }
 
-.picker { display: flex; flex-direction: column; align-items: center; gap: 10px; width: min(460px, 100%); }
-.picker .filebtn { position: relative; }
-.urlrow { display: flex; gap: 4px; width: 100%; }
-.urlrow input { flex: 1; min-width: 0; font: inherit; padding: 3px 6px; border: 2px solid; border-color: var(--shadow) var(--hi) var(--hi) var(--shadow); background: var(--hi); color: var(--ink); }
-.hint { font-size: 12px; color: var(--face); }
-.hint code { color: var(--hi); }
-.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
-.statusbar { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 4px; }
-.statusbar > div {
-  flex: 1 1 140px; min-width: 0;
-  border: 1px solid; border-color: var(--shadow) var(--hi) var(--hi) var(--shadow);
-  padding: 2px 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-  font-variant-numeric: tabular-nums;
-}
 </style>
 </head>
 <body>
 
-<main class="window">
+<main class="window" id="window">
   <div class="titlebar">
     <svg class="logo" viewBox="0 0 16 16" aria-hidden="true"><rect x="1" y="1" width="6" height="6" fill="#f25022"/><rect x="9" y="1" width="6" height="6" fill="#7fba00"/><rect x="1" y="9" width="6" height="6" fill="#00a4ef"/><rect x="9" y="9" width="6" height="6" fill="#ffb900"/></svg>
     <h1>Windows 95 — v86 emulator</h1>
-  </div>
-
-  <div class="toolbar" role="toolbar" aria-label="Emulator controls">
-    <button id="btn_pause" type="button" disabled>Pause</button>
-    <button id="btn_reset" type="button" disabled>Reset</button>
-    <span class="sep"></span>
-    <button id="btn_cad" type="button" disabled>Ctrl+Alt+Del</button>
-    <button id="btn_alttab" type="button" disabled>Alt+Tab</button>
-    <button id="btn_win" type="button" disabled>Start key</button>
-    <span class="sep"></span>
-    <button id="btn_mouse" type="button" disabled title="Capture the mouse. Press Esc to release.">Lock mouse</button>
-    <button id="btn_full" type="button" disabled>Fullscreen</button>
-    <label class="inline" for="scale">Scale
-      <select id="scale">
-        <option value="1">1×</option>
-        <option value="1.5">1.5×</option>
-        <option value="2">2×</option>
-        <option value="fit" selected>Fit</option>
-      </select>
-    </label>
-    <button id="btn_shot" type="button" disabled>Screenshot</button>
-    <span class="sep"></span>
-    <button id="btn_save" type="button" disabled>Save state</button>
-    <label class="filebtn" for="restore_file">Restore state<input id="restore_file" type="file" accept=".bin,.zst,application/octet-stream"></label>
+    <div class="window-controls" aria-label="Window controls">
+      <button id="minimize" type="button" aria-label="Minimize" title="Minimize">_</button>
+      <button id="maximize" type="button" aria-label="Maximize" title="Maximize">□</button>
+      <button id="close" type="button" aria-label="Close" title="Close">×</button>
+    </div>
   </div>
 
   <div class="screen-well" id="well">
@@ -154,47 +118,24 @@ label.inline { display: inline-flex; gap: 4px; align-items: center; }
       <canvas style="display: none"></canvas>
     </div>
     <div class="boot" id="boot">
-      <div id="picker" class="picker">
-        <p><strong>Start Windows 95</strong></p>
-        <p id="boot_error" class="hint" hidden></p>
-        <p>Pick the Windows 95 hard disk image to boot. It runs entirely in this tab; nothing is uploaded.</p>
-        <label class="filebtn" for="hda_file">Open disk image (.img)…<input id="hda_file" type="file" accept=".img,.ima,.vhd,.raw,application/octet-stream"></label>
-        <form id="url_form" class="urlrow">
-          <label for="hda_url" class="sr">Disk image URL</label>
-          <input id="hda_url" type="url" placeholder="https://example.com/win95.img" autocomplete="off">
-          <button type="submit">Boot from URL</button>
-        </form>
-        <p class="hint">A URL must allow cross-origin range requests. For a copy.sh-style chunked mirror, open this page with <code>?cdn=https://your-mirror/</code>.</p>
-      </div>
-      <div id="progress" hidden>
-        <p><strong>Starting Windows 95…</strong></p>
-        <div class="meter" aria-hidden="true"><span id="meter"></span></div>
-        <p id="boot_msg">Loading the emulator</p>
-      </div>
+      <p><strong>Starting Windows 95…</strong></p>
+      <div class="meter" aria-hidden="true"><span id="meter"></span></div>
+      <p id="boot_msg" role="status">Loading the emulator</p>
     </div>
   </div>
-
-  <div class="statusbar" aria-live="polite">
-    <div id="st_state">State: loading</div>
-    <div id="st_speed">Speed: — MIPS</div>
-    <div id="st_uptime">Uptime: 0s</div>
-    <div id="st_res">Screen: —</div>
-    <div id="st_disk">Disk: none</div>
-  </div>
 </main>
+<div id="closed" hidden>Windows 95 closed. Reload the page to start again.</div>
 
 <script src="build/libv86.js"></script>
 <script>
 "use strict";
 (function () {
   const $ = (id) => document.getElementById(id);
-  const params = new URLSearchParams(location.search);
   let emulator = null;
+  let closed = false;
+  let resumeAfterMinimize = false;
 
-  function boot(hda, label) {
-    $("picker").hidden = true;
-    $("progress").hidden = false;
-    $("st_disk").textContent = "Disk: " + label;
+  function boot() {
     emulator = new V86({
       wasm_path: "build/v86.wasm",
       screen_container: $("screen_container"),
@@ -202,192 +143,89 @@ label.inline { display: inline-flex; gap: 4px; align-items: center; }
       vga_memory_size: 8 * 1024 * 1024,
       bios: { url: "bios/seabios.bin" },
       vga_bios: { url: "bios/vgabios.bin" },
-      hda: hda,
+      hda: {
+        url: "images/windows95-v3/.img",
+        size: 471859200,
+        async: true,
+        fixed_chunk_size: 256 * 1024,
+        use_parts: true,
+      },
       autostart: true,
     });
     window.emulator = emulator;
     wire();
   }
 
-  $("hda_file").onchange = (ev) => {
-    const file = ev.target.files[0];
-    if (file) boot({ buffer: file, async: true }, file.name + " (" + Math.round(file.size / 1048576) + " MB, local)");
-  };
-  $("url_form").addEventListener("submit", (ev) => {
-    ev.preventDefault();
-    const url = $("hda_url").value.trim();
-    if (url) boot({ url: url, async: true }, url.split("/").pop() + " (streamed)");
-  });
-
-  // ?cdn=https://mirror/ : chunked layout identical to copy.sh's windows95 profile
-  // (<cdn>windows95-v3/<start>-<end>.img, 256 KB parts, 450 MB disk).
-  const cdn = params.get("cdn");
-  if (cdn) {
-    boot({
-      url: cdn.replace(/\/?$/, "/") + "windows95-v3/.img",
-      size: 471859200,
-      async: true,
-      fixed_chunk_size: 256 * 1024,
-      use_parts: true,
-    }, "450 MB, streamed from mirror");
-  } else if (params.get("hda")) {
-    $("hda_url").value = params.get("hda");
-  } else if (params.get("manual") !== "1") {
-    boot({
-      url: "images/windows95-v3/.img",
-      size: 471859200,
-      async: true,
-      fixed_chunk_size: 256 * 1024,
-      use_parts: true,
-    }, "Windows 95 (server image)");
-  }
-
-  const controls = ["btn_pause", "btn_reset", "btn_cad", "btn_alttab", "btn_win", "btn_mouse", "btn_full", "btn_shot", "btn_save"];
-  let started = false, uptime = 0, lastInstr = 0, lastTick = 0;
+  let started = false;
 
   function wire() {
-  emulator.add_listener("download-progress", (e) => {
-    if (started) return;
-    const pct = e.total ? Math.round(100 * e.loaded / e.total) : 0;
-    $("meter").style.width = pct + "%";
-    const name = (e.file_name || "").split("/").pop() || "files";
-    $("boot_msg").textContent = "Downloading " + name + " (" + (e.file_index + 1) + " of " + e.file_count + ")" + (e.total ? " — " + pct + "%" : "");
-  });
-  emulator.add_listener("download-error", (e) => {
-    $("boot_error").textContent = "Could not load the server image. Choose a local disk or enter another URL.";
-    $("boot_error").hidden = false;
-    $("progress").hidden = true;
-    $("picker").hidden = false;
-    $("st_state").textContent = "State: download error";
-  });
-  emulator.add_listener("emulator-ready", () => {
-    started = true;
-    $("boot").hidden = true;
-    controls.forEach((id) => { $(id).disabled = false; });
-    $("st_state").textContent = "State: running";
-    applyScale();
-    lastTick = performance.now();
-    lastInstr = emulator.get_instruction_counter();
-    setInterval(tick, 1000);
-  });
-  emulator.add_listener("screen-set-size", (args) => {
-    const [w, h, bpp] = args;
-    $("st_res").textContent = "Screen: " + w + "×" + h + (bpp ? " " + bpp + "-bit" : " text");
-    applyScale();
-  });
+    emulator.add_listener("download-progress", (e) => {
+      if (started || closed) return;
+      const pct = e.total ? Math.round(100 * e.loaded / e.total) : 0;
+      $("meter").style.width = pct + "%";
+      $("boot_msg").textContent = "Loading disk " + (e.file_index + 1) + " of " + e.file_count +
+        (e.total ? " — " + pct + "%" : "");
+    });
+    emulator.add_listener("download-error", () => {
+      if (closed) return;
+      $("meter").hidden = true;
+      $("boot_msg").textContent = "Could not load the server image. Reload the page to retry.";
+    });
+    emulator.add_listener("emulator-ready", () => {
+      if (closed) return;
+      started = true;
+      $("boot").hidden = true;
+    });
   }
 
-  function tick() {
-    const now = performance.now();
-    const instr = emulator.get_instruction_counter();
-    let delta = instr - lastInstr;
-    if (delta < 0) delta += 0x100000000;
-    const mips = delta / 1000 / (now - lastTick);
-    lastInstr = instr; lastTick = now;
-    if (emulator.is_running()) {
-      uptime++;
-      $("st_speed").textContent = "Speed: " + mips.toFixed(1) + " MIPS";
-    } else {
-      $("st_speed").textContent = "Speed: paused";
-    }
-    const m = Math.floor(uptime / 60), s = uptime % 60;
-    $("st_uptime").textContent = "Uptime: " + (m ? m + "m " : "") + s + "s";
+  function restoreWindow() {
+    $("window").classList.remove("minimized");
+    $("minimize").setAttribute("aria-label", "Minimize");
+    $("minimize").title = "Minimize";
+    if (resumeAfterMinimize && emulator) emulator.run();
+    resumeAfterMinimize = false;
   }
 
-  $("btn_pause").onclick = () => {
-    if (emulator.is_running()) {
-      emulator.stop();
-      $("btn_pause").textContent = "Resume";
-      $("btn_pause").setAttribute("aria-pressed", "true");
-      $("st_state").textContent = "State: paused";
-    } else {
-      emulator.run();
-      $("btn_pause").textContent = "Pause";
-      $("btn_pause").setAttribute("aria-pressed", "false");
-      $("st_state").textContent = "State: running";
-    }
-  };
-  $("btn_reset").onclick = () => { emulator.restart(); uptime = 0; };
-  // PS/2 set-1 scancodes, identical to copy.sh's buttons
-  $("btn_cad").onclick = () => emulator.keyboard_send_scancodes([0x1D, 0x38, 0x53, 0xD3, 0xB8, 0x9D]);
-  $("btn_alttab").onclick = () => emulator.keyboard_send_scancodes([0x38, 0x0F, 0x8F, 0xB8]);
-  $("btn_win").onclick = () => emulator.keyboard_send_scancodes([0xE0, 0x5B, 0xE0, 0xDB]);
-  $("btn_mouse").onclick = () => { try { emulator.lock_mouse(); } catch (e) { /* pointer lock unavailable */ } };
-  $("btn_full").onclick = () => {
-    const el = $("well");
-    const req = el.requestFullscreen || el.webkitRequestFullscreen;
-    if (req) Promise.resolve(req.call(el)).catch(() => {});
-  };
-  document.addEventListener("fullscreenchange", applyScale);
-  window.addEventListener("resize", applyScale);
-
-  $("scale").onchange = applyScale;
-  function applyScale() {
-    const canvas = $("screen_container").querySelector("canvas");
-    const textLayer = $("screen_container").querySelector("div");
-    const v = $("scale").value;
-    let s;
-    if (!emulator) return;
-    if (v === "fit") {
-      // Text mode keeps its native size; graphics modes use the available pane.
-      const w = canvas.style.display === "none" ? 0 : canvas.width;
-      const h = canvas.style.display === "none" ? 0 : canvas.height;
-      const well = $("well");
-      const availW = well.clientWidth - 4;
-      const availH = well.clientHeight - 4;
-      s = (w && h) ? Math.min(availW / w, availH / h) : 1;
-      if (!(s > 0)) s = 1;
-    } else {
-      s = parseFloat(v);
-    }
-    emulator.screen_set_scale(s, s);
-  }
-
-  $("btn_shot").onclick = () => {
-    const img = emulator.screen_make_screenshot();
-    if (!img) return;
-    const a = document.createElement("a");
-    a.href = img.src;
-    a.download = "windows95-" + Date.now() + ".png";
-    a.click();
-  };
-
-  $("btn_save").onclick = async () => {
-    $("btn_save").disabled = true;
-    $("st_state").textContent = "State: saving snapshot…";
-    try {
-      const buf = await emulator.save_state();
-      const url = URL.createObjectURL(new Blob([buf]));
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = "windows95-state.bin";
-      a.click();
-      setTimeout(() => URL.revokeObjectURL(url), 10000);
-      $("st_state").textContent = "State: snapshot saved (" + (buf.byteLength / 1048576).toFixed(1) + " MB)";
-    } catch (e) {
-      $("st_state").textContent = "State: snapshot failed — " + e.message;
-    }
-    $("btn_save").disabled = false;
-  };
-
-  $("restore_file").onchange = async (ev) => {
-    const file = ev.target.files[0];
-    if (!file) return;
-    if (!emulator) {
-      $("st_state").textContent = "State: open a disk image first, then restore a snapshot made with it";
-      ev.target.value = "";
+  $("minimize").onclick = async () => {
+    if ($("window").classList.contains("minimized")) {
+      restoreWindow();
       return;
     }
-    try {
-      const buf = await file.arrayBuffer();
-      await emulator.restore_state(buf);
-      emulator.run();
-      $("st_state").textContent = "State: restored " + file.name;
-    } catch (e) {
-      $("st_state").textContent = "State: restore failed — " + e.message;
+    if (document.fullscreenElement) {
+      try { await document.exitFullscreen(); } catch (_) { /* Continue minimizing. */ }
     }
-    ev.target.value = "";
+    resumeAfterMinimize = !!emulator?.is_running();
+    if (resumeAfterMinimize) emulator.stop();
+    $("window").classList.add("minimized");
+    $("minimize").setAttribute("aria-label", "Restore");
+    $("minimize").title = "Restore";
   };
+
+  $("maximize").onclick = async () => {
+    if ($("window").classList.contains("minimized")) restoreWindow();
+    try {
+      if (document.fullscreenElement) await document.exitFullscreen();
+      else await $("window").requestFullscreen();
+    } catch (_) { /* Fullscreen can be denied by browser policy. */ }
+  };
+
+  $("close").onclick = async () => {
+    closed = true;
+    if (document.fullscreenElement) {
+      try { await document.exitFullscreen(); } catch (_) { /* Continue closing. */ }
+    }
+    if (emulator?.is_running()) emulator.stop();
+    $("window").hidden = true;
+    $("closed").hidden = false;
+  };
+
+  document.addEventListener("fullscreenchange", () => {
+    const maximized = !!document.fullscreenElement;
+    $("maximize").setAttribute("aria-label", maximized ? "Restore" : "Maximize");
+    $("maximize").title = maximized ? "Restore" : "Maximize";
+    $("maximize").textContent = maximized ? "❐" : "□";
+  });
+  boot();
 })();
 </script>
 </body>
