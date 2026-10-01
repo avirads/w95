@@ -11,7 +11,8 @@ It is a static site with no build step, so GitHub Pages can host it.
 
 On Fastium, v86's `windows95-v3` profile image is mirrored as 1,800 local
 256 KiB chunks under `images/windows95-v3/` and boots automatically. The
-`mirror-v86-win95.sh` script downloads and validates that image. There is no
+`mirror-v86-win95.sh` script downloads and validates that image, then patches
+Internet Explorer's default home page to `about:blank`. There is no
 manual disk picker. The image is not included in this repository.
 
 ## Networking
