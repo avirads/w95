@@ -1,7 +1,7 @@
 # Windows 95 in the browser (v86)
 
 A self-hosted copy of the [copy.sh/v86 `windows95` profile](https://copy.sh/v86/?profile=windows95):
-the [v86](https://github.com/copy/v86) x86 emulator (WebAssembly) set up as the same machine
+the [v86](https://github.com/copy/v86) x86 browser runtime (WebAssembly) set up as the same machine
 (64 MB RAM, 8 MB VGA, SeaBIOS). The page is a single browser-filling window
 with Minimize, Maximize (browser fullscreen), and Close controls. Reloading
 restarts the VM after Close. The guest display stretches to fill the available
