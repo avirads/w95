@@ -33,6 +33,23 @@ and `192.168.42.11/24`) to communicate. A lone Windows 95 VM has no peer.
 Windows 95's bundled browser may not support modern TLS websites even when the
 network is connected. Use a plain HTTP test endpoint to validate reachability.
 
+## Jev agent
+
+The Jev agent panel accepts a natural-language goal and runs a bounded
+screen-observe/action loop. It uses the same self-hosted OCR and server-side
+`/20260918/api/jev/pc-step` route as Fastium's `/v86-pc/` page. Screenshots stay
+in the browser; recognized text, candidate actions and recent action history
+go to Jev. The server's `TYPESAFE_API_KEY` never reaches this page. Only OCR
+targets, the fixed Windows Start button, allowlisted keys and literal text
+quoted in the goal can become actions. Run can be cancelled; the VM resumes
+for manual control when a task ends.
+
+This is screen-based automation, not a Windows guest agent. OCR may miss
+unlabelled graphics or unfamiliar controls; uncertainty stops the task rather
+than inventing a click. Agent support requires Fastium's `/v86-pc/` OCR assets
+and Jev API, so a standalone GitHub Pages copy will boot Windows but will not
+run the agent.
+
 ## Disk image
 
 Windows 95 is proprietary; confirm you have rights to host and use an image

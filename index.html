@@ -53,6 +53,20 @@ body {
 .titlebar h1 { font-size: 13px; margin: 0; flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .titlebar .logo { width: 16px; height: 16px; flex: none; }
 .window-controls { display: flex; gap: 2px; margin-left: auto; }
+.agent-toggle { font: 11px var(--ui); padding: 1px 6px; color: var(--ink); cursor: pointer; }
+.agent-panel {
+  position: absolute; z-index: 5; top: 8px; left: 8px;
+  width: min(420px, calc(100% - 16px));
+  padding: 9px; background: var(--face);
+  border: 2px solid; border-color: var(--hi) var(--dark) var(--dark) var(--hi);
+  box-shadow: 2px 2px 0 #0008;
+  display: grid; gap: 6px;
+}
+.agent-panel label { font-weight: bold; }
+.agent-panel textarea { width: 100%; min-height: 70px; resize: vertical; font: 13px var(--ui); }
+.agent-panel .agent-actions { display: flex; gap: 6px; }
+.agent-panel button { font: 12px var(--ui); padding: 3px 10px; cursor: pointer; }
+.agent-panel output { display: block; min-height: 30px; max-height: 70px; overflow: auto; font-size: 12px; }
 .network-choice { color: #fff; font: 11px var(--ui); white-space: nowrap; }
 .network-choice select { max-width: 118px; font: 11px var(--ui); }
 #network_status { font: 11px var(--ui); max-width: 145px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -108,6 +122,7 @@ body {
   <div class="titlebar">
     <svg class="logo" viewBox="0 0 16 16" aria-hidden="true"><rect x="1" y="1" width="6" height="6" fill="#f25022"/><rect x="9" y="1" width="6" height="6" fill="#7fba00"/><rect x="1" y="9" width="6" height="6" fill="#00a4ef"/><rect x="9" y="9" width="6" height="6" fill="#ffb900"/></svg>
     <h1>Windows 95</h1>
+    <button id="agent_toggle" class="agent-toggle" type="button" aria-expanded="true" aria-controls="agent_panel">Jev agent</button>
     <label class="network-choice" for="network_mode">Network <select id="network_mode"><option value="internet">Internet</option><option value="local">Browser-local</option></select></label>
     <span id="network_status" role="status" title="Network status">Connecting…</span>
     <div class="window-controls" aria-label="Window controls">
@@ -127,11 +142,21 @@ body {
       <div class="meter" aria-hidden="true"><span id="meter"></span></div>
       <p id="boot_msg" role="status">Starting Windows 95</p>
     </div>
+    <section class="agent-panel" id="agent_panel" aria-label="Jev agent">
+      <label for="agent_goal">What should Windows 95 do?</label>
+      <textarea id="agent_goal" placeholder="Open Notepad and type 'Hello from Jev'"></textarea>
+      <div class="agent-actions">
+        <button id="agent_run" type="button" disabled>Run</button>
+        <button id="agent_cancel" type="button" disabled>Cancel</button>
+      </div>
+      <output id="agent_state" aria-live="polite">Waiting for Windows 95. Put exact text to type in quotes.</output>
+    </section>
   </div>
 </main>
 <div id="closed" hidden>Windows 95 closed. Reload the page to start again.</div>
 
 <script src="build/libv86.js"></script>
+<script src="/v86-pc/ocr/tesseract.min.js"></script>
 <script>
 "use strict";
 (function () {
@@ -139,6 +164,7 @@ body {
   let emulator = null;
   let closed = false;
   let resumeAfterMinimize = false;
+  let agent = null;
   const mode = new URL(location.href).searchParams.get("network") === "local" ? "local" : "internet";
   let networkSocket = null;
   $("network_mode").value = mode;
@@ -235,8 +261,46 @@ body {
       if (closed) return;
       started = true;
       $("boot").hidden = true;
+      $("agent_run").disabled = false;
+      $("agent_state").textContent = "Ready. Describe a goal, then press Run.";
     });
   }
+
+  $("agent_toggle").onclick = () => {
+    const panel = $("agent_panel");
+    panel.hidden = !panel.hidden;
+    $("agent_toggle").setAttribute("aria-expanded", String(!panel.hidden));
+  };
+
+  $("agent_run").onclick = async () => {
+    const goal = $("agent_goal").value.trim();
+    if (!goal) { $("agent_state").textContent = "Enter a goal first."; return; }
+    if (!emulator || !started || closed) return;
+    if (!window.Tesseract) {
+      $("agent_state").textContent = "Screen reading is unavailable. Reload and try again.";
+      return;
+    }
+    $("agent_run").disabled = true;
+    $("agent_cancel").disabled = false;
+    try {
+      const { WindowsAgent } = await import("./w95-agent.mjs");
+      if (closed) return;
+      agent = new WindowsAgent(emulator, () => {
+        const canvas = $("screen_container").querySelector("canvas");
+        return { w: canvas.width || 640, h: canvas.height || 480 };
+      }, message => { $("agent_state").textContent = message; },
+      () => !closed && !$("window").classList.contains("minimized"));
+      const result = await agent.run(goal);
+      $("agent_state").textContent = result.summary;
+    } catch (error) {
+      $("agent_state").textContent = "Agent stopped: " + error.message;
+    } finally {
+      agent = null;
+      $("agent_run").disabled = !started || closed;
+      $("agent_cancel").disabled = true;
+    }
+  };
+  $("agent_cancel").onclick = () => { agent?.stop(); $("agent_state").textContent = "Stopping agent…"; };
 
   function restoreWindow() {
     $("window").classList.remove("minimized");
@@ -254,6 +318,7 @@ body {
     if (document.fullscreenElement) {
       try { await document.exitFullscreen(); } catch (_) { /* Continue minimizing. */ }
     }
+    agent?.stop();
     resumeAfterMinimize = !!emulator?.is_running();
     if (resumeAfterMinimize) emulator.stop();
     $("window").classList.add("minimized");
@@ -271,6 +336,7 @@ body {
 
   $("close").onclick = async () => {
     closed = true;
+    agent?.stop();
     if (document.fullscreenElement) {
       try { await document.exitFullscreen(); } catch (_) { /* Continue closing. */ }
     }
