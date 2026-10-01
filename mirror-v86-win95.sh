@@ -26,27 +26,3 @@ for number in $(seq 0 1799); do
   [[ $(stat -c %s "$destination/$start-$end.img") -eq 262144 ]]
 done
 echo "Verified 1800 Windows 95 chunks (471859200 bytes) in $destination"
-
-# IE's HKCU Start Page lives in this chunk of the stock windows95-v3 USER.DAT.
-# Keep the replacement the same length to avoid rewriting FAT/registry layout.
-python3 - "$destination/212074496-212336640.img" <<'PY'
-from pathlib import Path
-import sys
-
-chunk = Path(sys.argv[1])
-data = bytearray(chunk.read_bytes())
-old = b"Start Pagehttp://copy.sh"
-new = b"Start Pageabout:blank\x00\x00\x00"
-if data.count(new) == 1:
-    print("Internet Explorer home page already set to about:blank")
-elif data.count(old) == 1:
-    offset = data.index(old)
-    data[offset:offset + len(old)] = new
-    replacement = chunk.with_name(chunk.name + ".tmp-homepage")
-    replacement.write_bytes(data)
-    replacement.chmod(chunk.stat().st_mode)
-    replacement.replace(chunk)
-    print("Set Internet Explorer home page to about:blank")
-else:
-    raise SystemExit("Unrecognized Windows 95 registry layout; home page not changed")
-PY
