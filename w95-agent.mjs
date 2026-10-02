@@ -1,5 +1,6 @@
 import { GuestInput } from '/kalib/input.js';
 import { ScreenObserver } from '/kalib/observation.js';
+import { chooseConfidentAction } from './w95-agent-choice.mjs';
 import { windowsActions } from './w95-actions.mjs';
 
 const pause = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds));
@@ -70,14 +71,11 @@ export class WindowsAgent {
         }
         pendingChange = null;
         const actions = windowsActions(goal, observation, history);
-        const result = await this.select({ goal, observation, actions, history: history.slice(-12) }, signal);
+        const action = await chooseConfidentAction({
+          goal, observation, actions, history: history.slice(-12),
+          select: this.select, signal, onLog: this.onLog,
+        });
         signal.throwIfAborted();
-        const action = actions.find(candidate => candidate.id === result?.action);
-        if (!action) throw new Error('Jev selected an unavailable action');
-        if (!['wait', 'blocked'].includes(action.type) &&
-            (!Number.isFinite(result.confidence) || result.confidence < 0.6)) {
-          throw new Error(`Jev was uncertain about ${action.label}; stopped safely`);
-        }
         this.onLog(`Step ${step}: ${action.label}`);
         if (action.type === 'done') return { success: true, summary: 'Jev reports the goal complete; verify the screen.' };
         if (action.type === 'blocked') return { success: false, summary: 'Jev could not find a safe next action.' };
