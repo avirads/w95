@@ -122,7 +122,7 @@ body {
   <div class="titlebar">
     <svg class="logo" viewBox="0 0 16 16" aria-hidden="true"><rect x="1" y="1" width="6" height="6" fill="#f25022"/><rect x="9" y="1" width="6" height="6" fill="#7fba00"/><rect x="1" y="9" width="6" height="6" fill="#00a4ef"/><rect x="9" y="9" width="6" height="6" fill="#ffb900"/></svg>
     <h1>Windows 95</h1>
-    <button id="agent_toggle" class="agent-toggle" type="button" aria-expanded="true" aria-controls="agent_panel">Jev agent</button>
+    <button id="agent_toggle" class="agent-toggle" type="button" aria-expanded="false" aria-controls="agent_panel">Jev agent</button>
     <label class="network-choice" for="network_mode">Network <select id="network_mode"><option value="internet">Internet</option><option value="local">Browser-local</option></select></label>
     <span id="network_status" role="status" title="Network status">Connecting…</span>
     <div class="window-controls" aria-label="Window controls">
@@ -142,7 +142,7 @@ body {
       <div class="meter" aria-hidden="true"><span id="meter"></span></div>
       <p id="boot_msg" role="status">Starting Windows 95</p>
     </div>
-    <section class="agent-panel" id="agent_panel" aria-label="Jev agent">
+    <section class="agent-panel" id="agent_panel" aria-label="Jev agent" hidden>
       <label for="agent_goal">What should Windows 95 do?</label>
       <textarea id="agent_goal" placeholder="Open Notepad and type 'Hello from Jev'"></textarea>
       <div class="agent-actions">
@@ -274,6 +274,7 @@ import { DISK_IMAGE, prepareDiskCache } from "./disk-cache.mjs";
     const panel = $("agent_panel");
     panel.hidden = !panel.hidden;
     $("agent_toggle").setAttribute("aria-expanded", String(!panel.hidden));
+    if (!panel.hidden) $("agent_goal").focus();
   };
 
   $("agent_run").onclick = async () => {

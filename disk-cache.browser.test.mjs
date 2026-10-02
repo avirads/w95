@@ -242,6 +242,23 @@ test('the real Windows 95 page waits for cache control before constructing V86',
       });
       assert.equal(await page.locator('#boot').isHidden(), true);
       assert.equal(await page.locator('#agent_run').isEnabled(), true);
+      const agentPanel = page.locator('#agent_panel');
+      const agentToggle = page.locator('#agent_toggle');
+      const agentGoal = page.locator('#agent_goal');
+      assert.equal(await agentPanel.isHidden(), true, 'the agent panel starts closed on every load');
+      assert.equal(await agentToggle.getAttribute('aria-expanded'), 'false');
+      await agentToggle.click();
+      assert.equal(await agentPanel.isVisible(), true, 'the agent button opens the panel');
+      assert.equal(await agentToggle.getAttribute('aria-expanded'), 'true');
+      const prompt = 'Open Notepad and type "Hello from Jev"';
+      await agentGoal.fill(prompt);
+      await agentToggle.click();
+      assert.equal(await agentPanel.isHidden(), true, 'a second click closes the panel');
+      assert.equal(await agentToggle.getAttribute('aria-expanded'), 'false');
+      await agentToggle.click();
+      assert.equal(await agentGoal.inputValue(), prompt, 'toggling the panel preserves the prompt');
+      assert.equal(await agentPanel.isVisible(), true);
+      assert.equal(await agentToggle.getAttribute('aria-expanded'), 'true');
       await page.waitForFunction(async path => Boolean(await caches.match(new URL(path, location.href).href)), chunk(0));
     }
     assert.equal(host.hits(chunk(0)), 1, 'real page first load and reload share the disk part');
