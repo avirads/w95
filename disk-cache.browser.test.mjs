@@ -326,7 +326,6 @@ test('agent suggestions, shortcuts and unobtrusive run controls work without sen
       assert.equal(await goal.evaluate(element => document.activeElement === element), true);
       suggestion = next;
     }
-
     await page.evaluate(() => {
       window.guestKeyEvents = [];
       for (const type of ['keydown', 'keyup']) {
@@ -417,6 +416,31 @@ test('agent suggestions, shortcuts and unobtrusive run controls work without sen
     assert.equal(await goal.isEnabled(), true);
     assert.equal(await shuffle.isEnabled(), true);
     assert.equal(host.hits('/20260918/api/jev/pc-step', 'POST'), 0, 'tests never invoke the real planner');
+    assert.deepEqual(errors, []);
+
+    await toggle.click();
+    const panelTitle = page.locator('#agent_panel_drag');
+    const beforeDrag = await panel.boundingBox();
+    const titleBox = await panelTitle.boundingBox();
+    await page.mouse.move(titleBox.x + 50, titleBox.y + titleBox.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(titleBox.x + 110, titleBox.y + titleBox.height / 2 + 55, { steps: 3 });
+    await page.mouse.up();
+    const afterDrag = await panel.boundingBox();
+    assert.ok(afterDrag.x > beforeDrag.x && afterDrag.y > beforeDrag.y,
+      'the agent window moves when its title bar is dragged');
+    const wellBox = await page.locator('#well').boundingBox();
+    assert.ok(afterDrag.x >= wellBox.x && afterDrag.y >= wellBox.y &&
+      afterDrag.x + afterDrag.width <= wellBox.x + wellBox.width &&
+      afterDrag.y + afterDrag.height <= wellBox.y + wellBox.height,
+    'dragging keeps the whole agent window inside the Windows display');
+    const closePrompt = 'Open Notepad and type "Kept after closing"';
+    await goal.fill(closePrompt);
+    await page.locator('#agent_panel_close').click();
+    assert.equal(await panel.isHidden(), true, 'the agent window close button hides the panel');
+    assert.equal(await toggle.getAttribute('aria-expanded'), 'false');
+    await toggle.click();
+    assert.equal(await goal.inputValue(), closePrompt, 'closing and reopening preserves the prompt');
     assert.deepEqual(errors, []);
   });
 

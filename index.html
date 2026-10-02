@@ -65,6 +65,14 @@ body {
   box-shadow: 2px 2px 0 #0008;
   display: grid; gap: 6px;
 }
+.agent-panel-titlebar {
+  display: flex; align-items: center; gap: 6px;
+  margin: -9px -9px 2px; padding: 3px 4px;
+  background: linear-gradient(90deg, var(--title-a), var(--title-b));
+  color: var(--hi); cursor: move; touch-action: none; user-select: none;
+}
+.agent-panel-titlebar strong { flex: 1; }
+.agent-panel-titlebar button { width: 22px; height: 19px; padding: 0; line-height: 14px; font-weight: bold; }
 .agent-panel label { font-weight: bold; }
 .agent-panel textarea { width: 100%; min-height: 70px; resize: vertical; font: 13px var(--ui); }
 .agent-panel textarea[data-suggested="true"] { color: #555; font-style: italic; }
@@ -156,6 +164,10 @@ body {
       <p id="boot_msg" role="status">Starting Windows 95</p>
     </div>
     <section class="agent-panel" id="agent_panel" aria-label="Jev agent" hidden>
+      <div class="agent-panel-titlebar" id="agent_panel_drag">
+        <strong>Jev agent</strong>
+        <button id="agent_panel_close" type="button" aria-label="Close agent window" title="Close">×</button>
+      </div>
       <label for="agent_goal">What should Windows 95 do?</label>
       <textarea id="agent_goal" maxlength="2000" aria-describedby="agent_hint" placeholder="Describe a Windows 95 task"></textarea>
       <span id="agent_hint" class="agent-hint">→ Accept suggestion · Enter Run · Shift+Enter new line</span>
@@ -355,6 +367,50 @@ import { nextWindowsPrompt } from "./agent-prompts.mjs";
     if ($("window").classList.contains("minimized")) restoreWindow();
     showAgentPanel($("agent_panel").hidden);
   };
+  $("agent_panel_close").onclick = () => {
+    showAgentPanel(false);
+    $("agent_toggle").focus();
+  };
+  const panelDrag = $("agent_panel_drag");
+  let panelDragState = null;
+  panelDrag.addEventListener("pointerdown", event => {
+    if (event.button !== 0 || event.target.closest("button")) return;
+    const panel = $("agent_panel");
+    const well = $("well");
+    const panelBounds = panel.getBoundingClientRect();
+    const wellBounds = well.getBoundingClientRect();
+    panelDragState = {
+      pointerId: event.pointerId,
+      x: event.clientX,
+      y: event.clientY,
+      left: panelBounds.left - wellBounds.left,
+      top: panelBounds.top - wellBounds.top,
+    };
+    panel.style.left = panelDragState.left + "px";
+    panel.style.top = panelDragState.top + "px";
+    panel.style.right = "auto";
+    panel.style.bottom = "auto";
+    panelDrag.setPointerCapture(event.pointerId);
+    event.preventDefault();
+  });
+  panelDrag.addEventListener("pointermove", event => {
+    if (!panelDragState || event.pointerId !== panelDragState.pointerId) return;
+    const panel = $("agent_panel");
+    const well = $("well");
+    const maxLeft = Math.max(0, well.clientWidth - panel.offsetWidth);
+    const maxTop = Math.max(0, well.clientHeight - panel.offsetHeight);
+    const left = panelDragState.left + event.clientX - panelDragState.x;
+    const top = panelDragState.top + event.clientY - panelDragState.y;
+    panel.style.left = Math.min(maxLeft, Math.max(0, left)) + "px";
+    panel.style.top = Math.min(maxTop, Math.max(0, top)) + "px";
+  });
+  function finishPanelDrag(event) {
+    if (!panelDragState || event.pointerId !== panelDragState.pointerId) return;
+    if (panelDrag.hasPointerCapture(event.pointerId)) panelDrag.releasePointerCapture(event.pointerId);
+    panelDragState = null;
+  }
+  panelDrag.addEventListener("pointerup", finishPanelDrag);
+  panelDrag.addEventListener("pointercancel", finishPanelDrag);
   $("agent_shuffle").onclick = () => { if (!agentBusy) suggestPrompt(); };
   $("agent_goal").oninput = () => { $("agent_goal").dataset.suggested = "false"; };
 

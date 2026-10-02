@@ -62,6 +62,10 @@ from safe built-in Windows 95 tasks; **Shuffle** replaces it with another.
 like **Run**, and **Shift+Enter** inserts a newline. You can also type your own
 goal. Suggestions are examples, not guarantees of successful automation.
 
+Drag the agent window by its blue title bar; it stays within the guest display.
+The title bar's **×** closes the panel and keeps the prompt, and the Jev agent
+button opens it again.
+
 Starting a run hides the panel so the guest remains visible. Progress and a
 **Cancel** button stay in the title bar; click the agent button to inspect the
 panel again. Progress, completion and errors do not automatically reopen it.
