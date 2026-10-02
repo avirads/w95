@@ -24,13 +24,14 @@ try {
 async function fixture({ actualIndex = false } = {}) {
   const hits = new Map();
   const sources = new Map(await Promise.all(
-    ['disk-image.mjs', 'disk-cache.mjs', 'disk-cache-sw.js'].map(async name =>
+    ['disk-image.mjs', 'disk-cache.mjs', 'disk-cache-sw.js', 'agent-prompts.mjs'].map(async name =>
       [`/w95/${name}`, await readFile(new URL(name, import.meta.url))]),
   ));
   const pageHtml = actualIndex ? await readFile(new URL('index.html', import.meta.url)) : harness;
   sources.set('/w95/build/libv86.js', `window.V86 = class {
     constructor(options) {
       this.listeners = new Map();
+      window.keyboardStatus = [];
       window.constructorProbe = {
         controller: navigator.serviceWorker.controller?.scriptURL,
         hda: options.hda,
@@ -43,8 +44,33 @@ async function fixture({ actualIndex = false } = {}) {
       setTimeout(() => this.listeners.get('emulator-ready')?.(), 0);
     }
     add_listener(name, callback) { this.listeners.set(name, callback); }
+    keyboard_set_status(enabled) { window.keyboardStatus.push(enabled); }
   };`);
-  sources.set('/v86-pc/ocr/tesseract.min.js', 'window.Tesseract = {};');
+  sources.set('/kalib/ocr/tesseract.min.js', 'window.Tesseract = {};');
+  sources.set('/w95/w95-agent.mjs', `
+    window.agentProbe = { runs: [], stops: 0, instances: 0 };
+    export class WindowsAgent {
+      constructor(emulator, dimensions, onLog) {
+        window.agentProbe.instances++;
+        window.agentTest = {
+          log: message => onLog(message),
+          complete: summary => this.resolve({ summary }),
+          fail: message => this.reject(new Error(message)),
+        };
+      }
+      run(goal) {
+        window.agentProbe.runs.push(goal);
+        return new Promise((resolve, reject) => {
+          this.resolve = resolve;
+          this.reject = reject;
+        });
+      }
+      stop() {
+        window.agentProbe.stops++;
+        this.resolve({ summary: 'Cancelled.' });
+      }
+    }
+  `);
   const server = createServer((request, response) => {
     const path = new URL(request.url, 'http://localhost').pathname;
     const key = `${request.method} ${path}${request.headers.range ? ' RANGE' : ''}`;
@@ -263,4 +289,175 @@ test('the real Windows 95 page waits for cache control before constructing V86',
     }
     assert.equal(host.hits(chunk(0)), 1, 'real page first load and reload share the disk part');
     assert.deepEqual(errors, []);
+  });
+
+test('agent suggestions, shortcuts and unobtrusive run controls work without sending real requests',
+  { timeout: 60_000 }, async t => {
+    const host = await fixture({ actualIndex: true });
+    const browser = await chromium.launch(browserOptions);
+    t.after(async () => {
+      await browser.close();
+      await host.close();
+    });
+    const page = await browser.newPage();
+    const errors = [];
+    page.on('pageerror', error => errors.push(error.message));
+    await page.goto(`${host.origin}/w95/?network=local`);
+    await page.waitForFunction(() => window.firstChunkLoaded === 262144 && document.getElementById('boot').hidden);
+    const panel = page.locator('#agent_panel');
+    const toggle = page.locator('#agent_toggle');
+    const goal = page.locator('#agent_goal');
+    const run = page.locator('#agent_run');
+    const shuffle = page.locator('#agent_shuffle');
+    const activity = page.locator('#agent_activity');
+    const stop = page.locator('#agent_stop');
+    assert.equal(await panel.isHidden(), true);
+    assert.equal(host.hits('/w95/w95-agent.mjs'), 0, 'opening the page does not load the agent');
+    await toggle.click();
+    let suggestion = await goal.inputValue();
+    assert.ok(suggestion.length > 15, 'first opening offers a usable Windows 95 prompt');
+    assert.equal(await goal.getAttribute('data-suggested'), 'true');
+    assert.equal(await goal.evaluate(element => document.activeElement === element), true);
+    for (let attempt = 0; attempt < 8; attempt++) {
+      await shuffle.click();
+      const next = await goal.inputValue();
+      assert.notEqual(next, suggestion, 'Shuffle must not repeat the current prompt');
+      assert.equal(await goal.getAttribute('data-suggested'), 'true');
+      assert.equal(await goal.evaluate(element => document.activeElement === element), true);
+      suggestion = next;
+    }
+
+    await page.evaluate(() => {
+      window.guestKeyEvents = [];
+      for (const type of ['keydown', 'keyup']) {
+        document.addEventListener(type, event => window.guestKeyEvents.push(`${type}:${event.key}`));
+      }
+    });
+    await goal.press('ArrowRight');
+    assert.equal(await goal.getAttribute('data-suggested'), 'false');
+    assert.deepEqual(await goal.evaluate(element => [element.selectionStart, element.selectionEnd]),
+      [suggestion.length, suggestion.length], 'Right Arrow accepts the suggestion at its end');
+    assert.equal(await goal.inputValue(), suggestion);
+    assert.equal(host.hits('/w95/w95-agent.mjs'), 0, 'accepting a suggestion does not run it');
+    await goal.press('Shift+Enter');
+    assert.equal(await goal.inputValue(), `${suggestion}\n`, 'Shift+Enter remains a text-editing shortcut');
+    for (const options of [
+      { isComposing: true }, { repeat: true }, { ctrlKey: true }, { altKey: true }, { metaKey: true },
+    ]) {
+      await goal.dispatchEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true, ...options });
+    }
+    assert.equal(await panel.isVisible(), true);
+    assert.equal(host.hits('/w95/w95-agent.mjs'), 0, 'IME, held keys and modified Enter do not submit');
+
+    await shuffle.click();
+    assert.equal(await goal.getAttribute('data-suggested'), 'true');
+    const requestedGoal = 'Open Notepad and type "Hello from the browser test"';
+    await goal.fill(requestedGoal);
+    assert.equal(await goal.getAttribute('data-suggested'), 'false', 'editing accepts custom text');
+    await goal.press('Enter');
+    await page.waitForFunction(() => window.agentProbe?.runs.length === 1);
+    assert.deepEqual(await page.evaluate(() => window.agentProbe.runs), [requestedGoal]);
+    assert.equal(await panel.isHidden(), true, 'running clears the VM display');
+    assert.equal(await toggle.getAttribute('aria-expanded'), 'false');
+    assert.equal(await activity.isVisible(), true, 'compact status stays available outside the VM display');
+    assert.equal(await activity.evaluate(element => {
+      const display = document.getElementById('well').getBoundingClientRect();
+      return Boolean(element.closest('.titlebar')) && element.getBoundingClientRect().bottom <= display.top;
+    }), true, 'active controls occupy the titlebar, not the guest framebuffer');
+    assert.equal(await stop.isVisible(), true);
+    assert.equal(await stop.isEnabled(), true);
+    assert.equal(await goal.isDisabled(), true);
+    assert.equal(await run.isDisabled(), true);
+    assert.equal(await shuffle.isDisabled(), true);
+    assert.deepEqual(await page.evaluate(() => window.guestKeyEvents), [],
+      'editing and submitting prompt shortcuts never reach guest document keyboard handlers');
+    await page.evaluate(() => window.agentTest.log('Opening Notepad…'));
+    assert.equal(await page.locator('#agent_brief').textContent(), 'Opening Notepad…');
+    assert.equal(await panel.isHidden(), true, 'progress does not reopen the panel');
+    await run.dispatchEvent('click');
+    await goal.dispatchEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true });
+    assert.equal(await page.evaluate(() => window.agentProbe.runs.length), 1, 'duplicate submissions are ignored');
+    await page.evaluate(() => window.agentTest.complete('Typed the requested text.'));
+    await page.waitForFunction(() => !document.getElementById('agent_run').disabled);
+    assert.equal(await panel.isHidden(), true, 'completion does not reopen the panel');
+    assert.equal(await page.locator('#agent_brief').textContent(), 'Typed the requested text.');
+    assert.ok(await stop.isHidden() || await stop.isDisabled(), 'Cancel is not active after completion');
+
+    await toggle.click();
+    assert.equal(await goal.inputValue(), requestedGoal, 'reopening retains the submitted goal');
+    await run.click();
+    await page.waitForFunction(() => window.agentProbe.runs.length === 2);
+    assert.deepEqual(await page.evaluate(() => window.agentProbe.runs), [requestedGoal, requestedGoal],
+      'Enter and Run submit the identical goal through the same path');
+    assert.equal(await panel.isHidden(), true);
+    await stop.click();
+    await page.waitForFunction(() => !document.getElementById('agent_run').disabled);
+    assert.equal(await page.evaluate(() => window.agentProbe.stops), 1, 'titlebar Cancel stops the active agent');
+    assert.equal(await panel.isHidden(), true);
+
+    await toggle.click();
+    await run.click();
+    await page.waitForFunction(() => window.agentProbe.runs.length === 3);
+    await toggle.click();
+    assert.equal(await panel.isVisible(), true, 'users may explicitly open status during a run');
+    assert.equal(await goal.isDisabled(), true);
+    await page.locator('#agent_cancel').click();
+    await page.waitForFunction(() => !document.getElementById('agent_run').disabled);
+    assert.equal(await page.evaluate(() => window.agentProbe.stops), 2, 'panel Cancel also stops the active agent');
+
+    if (await panel.isHidden()) await toggle.click();
+    await run.click();
+    await page.waitForFunction(() => window.agentProbe.runs.length === 4);
+    await page.evaluate(() => window.agentTest.fail('Synthetic planner failure'));
+    await page.waitForFunction(() => !document.getElementById('agent_run').disabled);
+    assert.equal(await panel.isHidden(), true, 'an error does not cover the VM display');
+    assert.match(await page.locator('#agent_brief').textContent(), /Synthetic planner failure/);
+    assert.equal(await activity.isVisible(), true, 'error status remains reachable');
+    assert.ok(await stop.isHidden() || await stop.isDisabled());
+    assert.equal(await goal.isEnabled(), true);
+    assert.equal(await shuffle.isEnabled(), true);
+    assert.equal(host.hits('/20260918/api/jev/pc-step', 'POST'), 0, 'tests never invoke the real planner');
+    assert.deepEqual(errors, []);
+  });
+
+test('cancelling while lazy agent or OCR code loads never launches automation afterward',
+  { timeout: 60_000 }, async t => {
+    const host = await fixture({ actualIndex: true });
+    const browser = await chromium.launch(browserOptions);
+    let releaseDownload;
+    t.after(async () => {
+      releaseDownload?.();
+      await browser.close();
+      await host.close();
+    });
+    for (const asset of ['/w95/w95-agent.mjs', '/kalib/ocr/tesseract.min.js']) {
+      const page = await browser.newPage();
+      const downloadGate = new Promise(resolve => { releaseDownload = resolve; });
+      let markIntercepted;
+      const intercepted = new Promise(resolve => { markIntercepted = resolve; });
+      await page.route(`**${asset}`, async route => {
+        markIntercepted();
+        await downloadGate;
+        await route.continue();
+      });
+      await page.goto(`${host.origin}/w95/?network=local`);
+      await page.waitForFunction(() => window.firstChunkLoaded === 262144 && document.getElementById('boot').hidden);
+      await page.locator('#agent_toggle').click();
+      await page.locator('#agent_run').click();
+      await intercepted;
+      assert.equal(await page.locator('#agent_panel').isHidden(), true);
+      assert.equal(await page.locator('#agent_stop').isEnabled(), true, 'Cancel works during lazy loading');
+      await page.locator('#agent_stop').click();
+      assert.match(await page.locator('#agent_brief').textContent(), /Stopping|cancelled/i);
+      releaseDownload();
+      await page.waitForFunction(() => !document.getElementById('agent_run').disabled);
+      assert.equal(await page.evaluate(() => window.agentProbe?.instances || 0), 0,
+        `cancellation during ${asset} loading prevents agent construction`);
+      assert.equal(await page.evaluate(() => window.agentProbe?.runs.length || 0), 0,
+        'the cancelled goal is never submitted');
+      assert.equal(await page.locator('#agent_panel').isHidden(), true);
+      assert.match(await page.locator('#agent_brief').textContent(), /cancelled/i);
+      await page.close();
+      releaseDownload = undefined;
+    }
   });

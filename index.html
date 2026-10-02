@@ -54,6 +54,9 @@ body {
 .titlebar .logo { width: 16px; height: 16px; flex: none; }
 .window-controls { display: flex; gap: 2px; margin-left: auto; }
 .agent-toggle { font: 11px var(--ui); padding: 1px 6px; color: var(--ink); cursor: pointer; }
+.agent-activity { display: flex; align-items: center; gap: 4px; min-width: 0; max-width: 240px; font: 11px var(--ui); }
+#agent_brief { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+#agent_stop { flex: none; font: 11px var(--ui); cursor: pointer; }
 .agent-panel {
   position: absolute; z-index: 5; top: 8px; left: 8px;
   width: min(420px, calc(100% - 16px));
@@ -64,6 +67,8 @@ body {
 }
 .agent-panel label { font-weight: bold; }
 .agent-panel textarea { width: 100%; min-height: 70px; resize: vertical; font: 13px var(--ui); }
+.agent-panel textarea[data-suggested="true"] { color: #555; font-style: italic; }
+.agent-hint { font-size: 11px; }
 .agent-panel .agent-actions { display: flex; gap: 6px; }
 .agent-panel button { font: 12px var(--ui); padding: 3px 10px; cursor: pointer; }
 .agent-panel output { display: block; min-height: 30px; max-height: 70px; overflow: auto; font-size: 12px; }
@@ -113,6 +118,10 @@ body {
 }
 .meter span { display: block; height: 100%; width: 0; background: repeating-linear-gradient(90deg, var(--title-a) 0 10px, transparent 10px 12px); transition: width .2s; }
 @media (prefers-reduced-motion: reduce) { .meter span { transition: none; } }
+@media (max-width: 700px) {
+  #network_status { display: none; }
+  .agent-activity { max-width: 130px; }
+}
 
 </style>
 </head>
@@ -123,6 +132,10 @@ body {
     <svg class="logo" viewBox="0 0 16 16" aria-hidden="true"><rect x="1" y="1" width="6" height="6" fill="#f25022"/><rect x="9" y="1" width="6" height="6" fill="#7fba00"/><rect x="1" y="9" width="6" height="6" fill="#00a4ef"/><rect x="9" y="9" width="6" height="6" fill="#ffb900"/></svg>
     <h1>Windows 95</h1>
     <button id="agent_toggle" class="agent-toggle" type="button" aria-expanded="false" aria-controls="agent_panel">Jev agent</button>
+    <div id="agent_activity" class="agent-activity" hidden>
+      <span id="agent_brief" role="status" aria-live="polite"></span>
+      <button id="agent_stop" type="button" disabled hidden>Cancel</button>
+    </div>
     <label class="network-choice" for="network_mode">Network <select id="network_mode"><option value="internet">Internet</option><option value="local">Browser-local</option></select></label>
     <span id="network_status" role="status" title="Network status">Connecting…</span>
     <div class="window-controls" aria-label="Window controls">
@@ -144,8 +157,10 @@ body {
     </div>
     <section class="agent-panel" id="agent_panel" aria-label="Jev agent" hidden>
       <label for="agent_goal">What should Windows 95 do?</label>
-      <textarea id="agent_goal" placeholder="Open Notepad and type 'Hello from Jev'"></textarea>
+      <textarea id="agent_goal" maxlength="2000" aria-describedby="agent_hint" placeholder="Describe a Windows 95 task"></textarea>
+      <span id="agent_hint" class="agent-hint">→ Accept suggestion · Enter Run · Shift+Enter new line</span>
       <div class="agent-actions">
+        <button id="agent_shuffle" type="button">Shuffle</button>
         <button id="agent_run" type="button" disabled>Run</button>
         <button id="agent_cancel" type="button" disabled>Cancel</button>
       </div>
@@ -156,9 +171,9 @@ body {
 <div id="closed" hidden>Windows 95 closed. Reload the page to start again.</div>
 
 <script src="build/libv86.js"></script>
-<script src="/v86-pc/ocr/tesseract.min.js"></script>
 <script type="module">
 import { DISK_IMAGE, prepareDiskCache } from "./disk-cache.mjs";
+import { nextWindowsPrompt } from "./agent-prompts.mjs";
 "use strict";
 (function () {
   const $ = (id) => document.getElementById(id);
@@ -166,6 +181,9 @@ import { DISK_IMAGE, prepareDiskCache } from "./disk-cache.mjs";
   let closed = false;
   let resumeAfterMinimize = false;
   let agent = null;
+  let agentBusy = false;
+  let cancelRequested = false;
+  let ocrLoading = null;
   const mode = new URL(location.href).searchParams.get("network") === "local" ? "local" : "internet";
   let networkSocket = null;
   $("network_mode").value = mode;
@@ -270,42 +288,147 @@ import { DISK_IMAGE, prepareDiskCache } from "./disk-cache.mjs";
     });
   }
 
-  $("agent_toggle").onclick = () => {
-    const panel = $("agent_panel");
-    panel.hidden = !panel.hidden;
-    $("agent_toggle").setAttribute("aria-expanded", String(!panel.hidden));
-    if (!panel.hidden) $("agent_goal").focus();
-  };
+  function suggestPrompt() {
+    const field = $("agent_goal");
+    field.value = nextWindowsPrompt(field.value);
+    field.dataset.suggested = "true";
+    field.focus();
+    field.setSelectionRange(0, 0);
+  }
 
-  $("agent_run").onclick = async () => {
+  function acceptPrompt() {
+    const field = $("agent_goal");
+    field.dataset.suggested = "false";
+    field.setSelectionRange(field.value.length, field.value.length);
+  }
+
+  function showAgentPanel(show) {
+    const panel = $("agent_panel");
+    if (!show && panel.contains(document.activeElement)) document.activeElement.blur();
+    panel.hidden = !show;
+    $("agent_toggle").setAttribute("aria-expanded", String(show));
+    if (show && !agentBusy) {
+      if (!$("agent_goal").value.trim()) suggestPrompt();
+      else $("agent_goal").focus();
+    }
+  }
+
+  function agentMessage(message) {
+    $("agent_state").textContent = message;
+    $("agent_brief").textContent = message;
+    $("agent_brief").title = message;
+  }
+
+  function agentBusyState(busy) {
+    agentBusy = busy;
+    $("agent_run").disabled = busy || !started || closed;
+    $("agent_goal").disabled = busy;
+    $("agent_shuffle").disabled = busy;
+    $("agent_cancel").disabled = !busy;
+    $("agent_stop").disabled = !busy;
+    $("agent_stop").hidden = !busy;
+    $("agent_toggle").textContent = busy ? "Jev running…" : "Jev agent";
+  }
+
+  function ensureOcr() {
+    if (window.Tesseract) return Promise.resolve();
+    if (!ocrLoading) {
+      ocrLoading = new Promise((resolve, reject) => {
+        const script = document.createElement("script");
+        const timer = setTimeout(() => finish(new Error("Screen reader download timed out")), 15000);
+        function finish(error) {
+          clearTimeout(timer);
+          script.onload = script.onerror = null;
+          script.remove();
+          if (error) reject(error); else resolve();
+        }
+        script.src = "/kalib/ocr/tesseract.min.js";
+        script.onload = () => finish(window.Tesseract ? null : new Error("Screen reader unavailable"));
+        script.onerror = () => finish(new Error("Could not load the screen reader"));
+        document.head.append(script);
+      }).catch(error => { ocrLoading = null; throw error; });
+    }
+    return ocrLoading;
+  }
+
+  $("agent_toggle").onclick = () => {
+    if ($("window").classList.contains("minimized")) restoreWindow();
+    showAgentPanel($("agent_panel").hidden);
+  };
+  $("agent_shuffle").onclick = () => { if (!agentBusy) suggestPrompt(); };
+  $("agent_goal").oninput = () => { $("agent_goal").dataset.suggested = "false"; };
+
+  // v86 listens on window. Host UI keystrokes must never reach the guest,
+  // including Enter's keyup after Run hides the focused textarea.
+  const hostKeys = new Set();
+  for (const host of [$("agent_panel"), document.querySelector(".titlebar")]) {
+    host.addEventListener("keydown", event => {
+      hostKeys.add(event.code || event.key);
+      event.stopPropagation();
+      if (event.target !== $("agent_goal") || event.isComposing) return;
+      if (event.key === "ArrowRight" && !event.shiftKey && !event.ctrlKey && !event.altKey && !event.metaKey &&
+          $("agent_goal").dataset.suggested === "true") {
+        event.preventDefault();
+        acceptPrompt();
+      } else if (event.key === "Enter" && !event.shiftKey && !event.ctrlKey && !event.altKey && !event.metaKey) {
+        event.preventDefault();
+        if (!event.repeat) runAgent();
+      }
+    });
+  }
+  document.addEventListener("keydown", event => {
+    // Holding Enter can retarget repeat events to body after the panel hides.
+    if (hostKeys.has(event.code || event.key) && !$("agent_panel").contains(event.target) &&
+        !document.querySelector(".titlebar").contains(event.target)) {
+      event.preventDefault();
+      event.stopPropagation();
+    }
+  }, true);
+  document.addEventListener("keyup", event => {
+    if (hostKeys.delete(event.code || event.key) || $("agent_panel").contains(event.target) ||
+        document.querySelector(".titlebar").contains(event.target)) event.stopPropagation();
+  }, true);
+  window.addEventListener("blur", () => hostKeys.clear());
+
+  async function runAgent() {
+    if (agentBusy || !emulator || !started || closed) return;
     const goal = $("agent_goal").value.trim();
     if (!goal) { $("agent_state").textContent = "Enter a goal first."; return; }
-    if (!emulator || !started || closed) return;
-    if (!window.Tesseract) {
-      $("agent_state").textContent = "Screen reading is unavailable. Reload and try again.";
-      return;
-    }
-    $("agent_run").disabled = true;
-    $("agent_cancel").disabled = false;
+    acceptPrompt();
+    cancelRequested = false;
+    agentBusyState(true);
+    $("agent_activity").hidden = false;
+    agentMessage("Starting agent…");
+    showAgentPanel(false);
     try {
-      const { WindowsAgent } = await import("./w95-agent.mjs");
-      if (closed) return;
+      const [{ WindowsAgent }] = await Promise.all([import("./w95-agent.mjs"), ensureOcr()]);
+      if (cancelRequested || closed || $("window").classList.contains("minimized")) {
+        agentMessage("Agent cancelled.");
+        return;
+      }
       agent = new WindowsAgent(emulator, () => {
         const canvas = $("screen_container").querySelector("canvas");
         return { w: canvas.width || 640, h: canvas.height || 480 };
-      }, message => { $("agent_state").textContent = message; },
+      }, agentMessage,
       () => !closed && !$("window").classList.contains("minimized"));
       const result = await agent.run(goal);
-      $("agent_state").textContent = result.summary;
+      agentMessage(result.summary);
     } catch (error) {
-      $("agent_state").textContent = "Agent stopped: " + error.message;
+      agentMessage(cancelRequested ? "Agent cancelled." : "Agent stopped: " + error.message);
     } finally {
       agent = null;
-      $("agent_run").disabled = !started || closed;
-      $("agent_cancel").disabled = true;
+      agentBusyState(false);
     }
-  };
-  $("agent_cancel").onclick = () => { agent?.stop(); $("agent_state").textContent = "Stopping agent…"; };
+  }
+  $("agent_run").onclick = runAgent;
+  function stopAgent() {
+    if (!agentBusy) return;
+    cancelRequested = true;
+    agent?.stop();
+    agentMessage("Stopping agent…");
+  }
+  $("agent_cancel").onclick = stopAgent;
+  $("agent_stop").onclick = stopAgent;
 
   function restoreWindow() {
     $("window").classList.remove("minimized");
@@ -323,8 +446,9 @@ import { DISK_IMAGE, prepareDiskCache } from "./disk-cache.mjs";
     if (document.fullscreenElement) {
       try { await document.exitFullscreen(); } catch (_) { /* Continue minimizing. */ }
     }
-    agent?.stop();
-    resumeAfterMinimize = !!emulator?.is_running();
+    stopAgent();
+    // The agent temporarily pauses the CPU while reading the screen.
+    resumeAfterMinimize = !!emulator && (agentBusy || emulator.is_running());
     if (resumeAfterMinimize) emulator.stop();
     $("window").classList.add("minimized");
     $("minimize").setAttribute("aria-label", "Restore");
@@ -341,7 +465,7 @@ import { DISK_IMAGE, prepareDiskCache } from "./disk-cache.mjs";
 
   $("close").onclick = async () => {
     closed = true;
-    agent?.stop();
+    stopAgent();
     if (document.fullscreenElement) {
       try { await document.exitFullscreen(); } catch (_) { /* Continue closing. */ }
     }

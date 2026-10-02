@@ -1,5 +1,5 @@
-import { GuestInput } from '/v86-pc/input.js';
-import { ScreenObserver } from '/v86-pc/observation.js';
+import { GuestInput } from '/kalib/input.js';
+import { ScreenObserver } from '/kalib/observation.js';
 import { windowsActions } from './w95-actions.mjs';
 
 const pause = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds));

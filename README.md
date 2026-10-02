@@ -56,9 +56,20 @@ network is connected. Use a plain HTTP test endpoint to validate reachability.
 
 ## Jev agent
 
+Click **Jev agent** to open the panel. It starts with a random suggestion drawn
+from safe built-in Windows 95 tasks; **Shuffle** replaces it with another.
+**Right Arrow** accepts a suggested prompt for editing, **Enter** runs it just
+like **Run**, and **Shift+Enter** inserts a newline. You can also type your own
+goal. Suggestions are examples, not guarantees of successful automation.
+
+Starting a run hides the panel so the guest remains visible. Progress and a
+**Cancel** button stay in the title bar; click the agent button to inspect the
+panel again. Progress, completion and errors do not automatically reopen it.
+The screen reader and agent code load only when a task is submitted.
+
 The Jev agent panel accepts a natural-language goal and runs a bounded
 screen-observe/action loop. It uses the same self-hosted OCR and server-side
-`/20260918/api/jev/pc-step` route as Fastium's `/v86-pc/` page. Screenshots stay
+`/20260918/api/jev/pc-step` route as Fastium's `/kalib/` page. Screenshots stay
 in the browser; recognized text, candidate actions and recent action history
 go to Jev. The server's `TYPESAFE_API_KEY` never reaches this page. Only OCR
 targets, the fixed Windows Start button, allowlisted keys and literal text
@@ -67,7 +78,7 @@ for manual control when a task ends.
 
 This is screen-based automation, not a Windows guest agent. OCR may miss
 unlabelled graphics or unfamiliar controls; uncertainty stops the task rather
-than inventing a click. Agent support requires Fastium's `/v86-pc/` OCR assets
+than inventing a click. Agent support requires Fastium's `/kalib/` OCR assets
 and Jev API, so a standalone GitHub Pages copy will boot Windows but will not
 run the agent.
 
@@ -82,6 +93,7 @@ directly to that directory); otherwise the page shows a loading error.
 ## Files
 
 - `index.html`: the page and controls
+- `agent-prompts.mjs`: bounded Windows 95 task suggestions and shuffle selection
 - `disk-image.mjs`, `disk-cache.mjs`, `disk-cache-sw.js`: versioned disk configuration and persistent, disk-only browser cache
 - `build/`: `libv86.js`, `v86.wasm` from the `v86` npm package 0.5.465 (BSD-2-Clause, see `build/LICENSE.v86`)
 - `bios/`: SeaBIOS and the VGA BIOS from the v86 repository
