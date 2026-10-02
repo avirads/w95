@@ -79,6 +79,8 @@ body {
 .agent-hint { font-size: 11px; }
 .agent-panel .agent-actions { display: flex; gap: 6px; }
 .agent-panel button { font: 12px var(--ui); padding: 3px 10px; cursor: pointer; }
+.agent-panel button.listening { color: #a00000; border-color: #a00000; }
+.agent-voice-note { font-size: 11px; color: #444; }
 .agent-panel output { display: block; min-height: 30px; max-height: 70px; overflow: auto; font-size: 12px; }
 .network-choice { color: #fff; font: 11px var(--ui); white-space: nowrap; }
 .network-choice select { max-width: 118px; font: 11px var(--ui); }
@@ -172,10 +174,13 @@ body {
       <textarea id="agent_goal" maxlength="2000" aria-describedby="agent_hint" placeholder="Describe a Windows 95 task"></textarea>
       <span id="agent_hint" class="agent-hint">→ Accept suggestion · Enter Run · Shift+Enter new line</span>
       <div class="agent-actions">
+        <button id="agent_voice" type="button" aria-label="Start voice dictation" aria-pressed="false">🎙 Dictate</button>
         <button id="agent_shuffle" type="button">Shuffle</button>
         <button id="agent_run" type="button" disabled>Run</button>
         <button id="agent_cancel" type="button" disabled>Cancel</button>
       </div>
+      <span id="agent_voice_status" class="agent-voice-note" role="status" aria-live="polite"></span>
+      <span class="agent-voice-note">Speech recognition may use your browser’s online service.</span>
       <output id="agent_state" aria-live="polite">Waiting for Windows 95. Put exact text to type in quotes.</output>
     </section>
   </div>
@@ -196,6 +201,8 @@ import { nextWindowsPrompt } from "./agent-prompts.mjs";
   let agentBusy = false;
   let cancelRequested = false;
   let ocrLoading = null;
+  let voiceRecognition = null;
+  let voiceBaseText = "";
   const mode = new URL(location.href).searchParams.get("network") === "local" ? "local" : "internet";
   let networkSocket = null;
   $("network_mode").value = mode;
@@ -336,6 +343,7 @@ import { nextWindowsPrompt } from "./agent-prompts.mjs";
     $("agent_run").disabled = busy || !started || closed;
     $("agent_goal").disabled = busy;
     $("agent_shuffle").disabled = busy;
+    $("agent_voice").disabled = busy || !("SpeechRecognition" in window || "webkitSpeechRecognition" in window);
     $("agent_cancel").disabled = !busy;
     $("agent_stop").disabled = !busy;
     $("agent_stop").hidden = !busy;
@@ -414,6 +422,99 @@ import { nextWindowsPrompt } from "./agent-prompts.mjs";
   $("agent_shuffle").onclick = () => { if (!agentBusy) suggestPrompt(); };
   $("agent_goal").oninput = () => { $("agent_goal").dataset.suggested = "false"; };
 
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SpeechRecognition) {
+    $("agent_voice").disabled = true;
+    $("agent_voice").title = "Voice dictation is not supported by this browser.";
+    $("agent_voice_status").textContent = "Voice dictation is not available in this browser.";
+  }
+
+  function clearVoiceButton() {
+    $("agent_voice").textContent = "🎙 Dictate";
+    $("agent_voice").setAttribute("aria-label", "Start voice dictation");
+    $("agent_voice").setAttribute("aria-pressed", "false");
+    $("agent_voice").classList.remove("listening");
+  }
+
+  function stopDictationForRun() {
+    const recognition = voiceRecognition;
+    voiceRecognition = null;
+    if (recognition) {
+      recognition.onresult = null;
+      recognition.onerror = null;
+      recognition.onend = null;
+      try { recognition.abort(); } catch (_) { /* It may have ended already. */ }
+      $("agent_voice_status").textContent = "Dictation stopped.";
+    }
+    clearVoiceButton();
+  }
+
+  $("agent_voice").onclick = () => {
+    if (agentBusy || !SpeechRecognition) return;
+    if (voiceRecognition) {
+      voiceRecognition.stop();
+      $("agent_voice_status").textContent = "Finishing dictation…";
+      return;
+    }
+    const recognition = new SpeechRecognition();
+    voiceRecognition = recognition;
+    const field = $("agent_goal");
+    voiceBaseText = field.dataset.suggested === "true" ? "" : field.value.trimEnd();
+    if (!voiceBaseText) field.value = "";
+    field.dataset.suggested = "false";
+    recognition.lang = navigator.language || "en-US";
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.maxAlternatives = 1;
+    recognition.onstart = () => {
+      if (voiceRecognition !== recognition) return;
+      $("agent_voice").textContent = "■ Stop dictation";
+      $("agent_voice").setAttribute("aria-label", "Stop voice dictation");
+      $("agent_voice").setAttribute("aria-pressed", "true");
+      $("agent_voice").classList.add("listening");
+      $("agent_voice_status").textContent = "Listening… speak your task.";
+      field.focus();
+    };
+    recognition.onresult = event => {
+      if (voiceRecognition !== recognition || agentBusy) return;
+      let spoken = "";
+      for (let index = 0; index < event.results.length; index++) {
+        spoken += event.results[index][0]?.transcript || "";
+      }
+      const transcript = [voiceBaseText, spoken.trim()].filter(Boolean).join(" ");
+      field.value = transcript.slice(0, 2000);
+      $("agent_voice_status").textContent = "Dictated text is in the prompt. Review it, then press Enter or Run.";
+      field.setSelectionRange(field.value.length, field.value.length);
+    };
+    recognition.onerror = event => {
+      if (voiceRecognition !== recognition) return;
+      const messages = {
+        "not-allowed": "Microphone access was denied. Allow microphone access for this site to dictate.",
+        "service-not-allowed": "The browser speech service is unavailable.",
+        "audio-capture": "No microphone was found.",
+        "no-speech": "No speech was heard. Press Dictate and try again.",
+        network: "The browser speech service could not be reached.",
+      };
+      $("agent_voice_status").textContent = messages[event.error] || `Voice input stopped (${event.error}).`;
+    };
+    recognition.onend = () => {
+      if (voiceRecognition !== recognition) return;
+      voiceRecognition = null;
+      clearVoiceButton();
+      if ($("agent_voice_status").textContent === "Listening… speak your task.") {
+        $("agent_voice_status").textContent = "Dictation ended. Press Dictate to continue.";
+      }
+    };
+    try {
+      $("agent_voice_status").textContent = "Requesting microphone access…";
+      recognition.start();
+    } catch (error) {
+      voiceRecognition = null;
+      clearVoiceButton();
+      $("agent_voice_status").textContent = "Could not start voice input: " + error.message;
+    }
+  };
+
   // v86 listens on window. Host UI keystrokes must never reach the guest,
   // including Enter's keyup after Run hides the focused textarea.
   const hostKeys = new Set();
@@ -453,6 +554,7 @@ import { nextWindowsPrompt } from "./agent-prompts.mjs";
     acceptPrompt();
     cancelRequested = false;
     agentBusyState(true);
+    stopDictationForRun();
     $("agent_activity").hidden = false;
     agentMessage("Starting agent…");
     showAgentPanel(false);

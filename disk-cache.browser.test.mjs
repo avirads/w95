@@ -302,6 +302,17 @@ test('agent suggestions, shortcuts and unobtrusive run controls work without sen
     const page = await browser.newPage();
     const errors = [];
     page.on('pageerror', error => errors.push(error.message));
+    await page.addInitScript(() => {
+      window.voiceSessions = [];
+      window.SpeechRecognition = class MockSpeechRecognition {
+        start() {
+          window.voiceSessions.push(this);
+          this.onstart?.();
+        }
+        stop() { this.onend?.(); }
+        abort() { this.onend?.(); }
+      };
+    });
     await page.goto(`${host.origin}/w95/?network=local`);
     await page.waitForFunction(() => window.firstChunkLoaded === 262144 && document.getElementById('boot').hidden);
     const panel = page.locator('#agent_panel');
@@ -347,6 +358,23 @@ test('agent suggestions, shortcuts and unobtrusive run controls work without sen
     }
     assert.equal(await panel.isVisible(), true);
     assert.equal(host.hits('/w95/w95-agent.mjs'), 0, 'IME, held keys and modified Enter do not submit');
+
+    const voice = page.locator('#agent_voice');
+    await goal.fill('');
+    assert.equal(await voice.isEnabled(), true, 'voice input is available when the browser supports it');
+    await voice.click();
+    assert.equal(await voice.getAttribute('aria-pressed'), 'true');
+    assert.match(await page.locator('#agent_voice_status').textContent(), /Listening/);
+    await page.evaluate(() => {
+      const recognition = window.voiceSessions.at(-1);
+      const result = [{ transcript: 'Open Notepad and type "Said aloud"' }];
+      result.isFinal = true;
+      recognition.onresult({ results: [result] });
+    });
+    assert.equal(await goal.inputValue(), 'Open Notepad and type "Said aloud"');
+    assert.equal(host.hits('/w95/w95-agent.mjs'), 0, 'dictation only fills the prompt');
+    await voice.click();
+    assert.equal(await voice.getAttribute('aria-pressed'), 'false');
 
     await shuffle.click();
     assert.equal(await goal.getAttribute('data-suggested'), 'true');

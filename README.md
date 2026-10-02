@@ -61,6 +61,9 @@ from safe built-in Windows 95 tasks; **Shuffle** replaces it with another.
 **Right Arrow** accepts a suggested prompt for editing, **Enter** runs it just
 like **Run**, and **Shift+Enter** inserts a newline. You can also type your own
 goal. Suggestions are examples, not guarantees of successful automation.
+Click **Dictate** and allow microphone access to speak a prompt; dictation fills
+the text box but does not start the agent. Speech recognition availability
+depends on the browser, and its speech service may process audio online.
 
 Drag the agent window by its blue title bar; it stays within the guest display.
 The title bar's **×** closes the panel and keeps the prompt, and the Jev agent
