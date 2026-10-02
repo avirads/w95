@@ -14,6 +14,27 @@ On Fastium, v86's `windows95-v3` profile image is mirrored as 1,800 local
 `mirror-v86-win95.sh` script downloads and validates that image. There is no
 manual disk picker. The image is not included in this repository.
 
+## Browser disk cache
+
+Image chunks are saved in the browser's persistent CacheStorage as Windows
+reads them. The first visit downloads the chunks it needs; later visits and
+reloads reuse those chunks without requesting them from the server. Previously
+unread parts still download on demand (the full image is 450 MiB). This caches
+the original image only: guest disk changes remain session-only.
+
+The disk-only service worker requires HTTPS or localhost. If storage is full,
+disabled, or unsupported, Windows continues with server downloads. The browser
+may evict cached data; clearing site data also requires another download.
+Page navigation, login, Jev/API calls and other assets are **not** served from
+this cache, so the page still requires Fastium authentication and connectivity.
+
+The immutable image revision is configured in `disk-image.mjs`. The current
+`images/windows95-v3-restored/` directory on Fastium points to the verified
+`windows95-v3/` mirror. For a new image, publish a **new directory URL** and
+update that configuration; never replace the bytes behind an existing revision.
+The worker removes only its own obsolete image caches when it updates. Deploy
+`disk-image.mjs`, `disk-cache.mjs`, and `disk-cache-sw.js` alongside `index.html`.
+
 ## Networking
 
 The title-bar Network selector reboots the VM when changed. **Internet** (the
@@ -55,11 +76,13 @@ run the agent.
 Windows 95 is proprietary; confirm you have rights to host and use an image
 before running the mirror script. The Git repository does not include a disk
 image. Run the script with `images/windows95-v3` as its destination before
-serving the page; otherwise the page shows a loading error.
+serving the page, then create the `images/windows95-v3-restored` alias (or mirror
+directly to that directory); otherwise the page shows a loading error.
 
 ## Files
 
 - `index.html`: the page and controls
+- `disk-image.mjs`, `disk-cache.mjs`, `disk-cache-sw.js`: versioned disk configuration and persistent, disk-only browser cache
 - `build/`: `libv86.js`, `v86.wasm` from the `v86` npm package 0.5.465 (BSD-2-Clause, see `build/LICENSE.v86`)
 - `bios/`: SeaBIOS and the VGA BIOS from the v86 repository
 - `mirror-v86-win95.sh`: reproducible downloader and size checks for the Fastium mirror
