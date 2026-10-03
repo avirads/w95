@@ -180,7 +180,7 @@ body {
         <button id="agent_cancel" type="button" disabled>Cancel</button>
       </div>
       <span id="agent_voice_status" class="agent-voice-note" role="status" aria-live="polite"></span>
-      <span class="agent-voice-note">Speech recognition may use your browser’s online service.</span>
+      <span class="agent-voice-note">Dictation uses your browser’s speech service where it has one; otherwise a speech model runs locally in this page (about 42&nbsp;MiB, nothing is uploaded).</span>
       <output id="agent_state" aria-live="polite">Waiting for Windows 95. Put exact text to type in quotes.</output>
     </section>
   </div>
@@ -191,6 +191,7 @@ body {
 <script type="module">
 import { DISK_IMAGE, prepareDiskCache } from "./disk-cache.mjs";
 import { nextWindowsPrompt } from "./agent-prompts.mjs";
+import { DEFAULT_MOONSHINE_BASE, LocalDictation, microphoneMessage, shouldFallBack, voiceEngine } from "./w95-voice.mjs";
 "use strict";
 (function () {
   const $ = (id) => document.getElementById(id);
@@ -202,7 +203,16 @@ import { nextWindowsPrompt } from "./agent-prompts.mjs";
   let cancelRequested = false;
   let ocrLoading = null;
   let voiceRecognition = null;
+  let localDictation = null;
   let voiceBaseText = "";
+  // The browser's own recognition when it has one; otherwise Moonshine running
+  // locally in the page (see w95-voice.mjs), so Dictate works in Firefox, on
+  // iOS outside Safari, and wherever the vendor's speech service is blocked.
+  // Declared up here because agentBusyState() reads voiceAvailable.
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  const canCapture = isSecureContext && Boolean(navigator.mediaDevices?.getUserMedia);
+  let voiceMode = voiceEngine({ hasNative: Boolean(SpeechRecognition), canCapture });
+  const voiceAvailable = voiceMode !== null;
   const mode = new URL(location.href).searchParams.get("network") === "local" ? "local" : "internet";
   let networkSocket = null;
   $("network_mode").value = mode;
@@ -343,7 +353,7 @@ import { nextWindowsPrompt } from "./agent-prompts.mjs";
     $("agent_run").disabled = busy || !started || closed;
     $("agent_goal").disabled = busy;
     $("agent_shuffle").disabled = busy;
-    $("agent_voice").disabled = busy || !("SpeechRecognition" in window || "webkitSpeechRecognition" in window);
+    $("agent_voice").disabled = busy || !voiceAvailable;
     $("agent_cancel").disabled = !busy;
     $("agent_stop").disabled = !busy;
     $("agent_stop").hidden = !busy;
@@ -422,11 +432,10 @@ import { nextWindowsPrompt } from "./agent-prompts.mjs";
   $("agent_shuffle").onclick = () => { if (!agentBusy) suggestPrompt(); };
   $("agent_goal").oninput = () => { $("agent_goal").dataset.suggested = "false"; };
 
-  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (!SpeechRecognition) {
+  if (!voiceAvailable) {
     $("agent_voice").disabled = true;
-    $("agent_voice").title = "Voice dictation is not supported by this browser.";
-    $("agent_voice_status").textContent = "Voice dictation is not available in this browser.";
+    $("agent_voice").title = "Voice dictation needs a microphone and a secure (https) page.";
+    $("agent_voice_status").textContent = "Voice dictation is not available here: it needs a microphone and an https page.";
   }
 
   function clearVoiceButton() {
@@ -446,16 +455,78 @@ import { nextWindowsPrompt } from "./agent-prompts.mjs";
       try { recognition.abort(); } catch (_) { /* It may have ended already. */ }
       $("agent_voice_status").textContent = "Dictation stopped.";
     }
+    if (localDictation) {
+      const local = localDictation;
+      localDictation = null;
+      local.stop();
+      $("agent_voice_status").textContent = "Dictation stopped.";
+    }
     clearVoiceButton();
   }
 
+  // Dictation with Moonshine running locally, for browsers without working
+  // built-in recognition. Called straight from the click (or, for the fallback,
+  // from the error that showed the built-in one is unusable); LocalDictation
+  // claims the microphone before it downloads anything.
+  function startLocalDictation() {
+    const field = $("agent_goal");
+    voiceBaseText = field.dataset.suggested === "true" ? "" : field.value.trimEnd();
+    if (!voiceBaseText) field.value = "";
+    field.dataset.suggested = "false";
+    const button = $("agent_voice");
+    const dictation = new LocalDictation({
+      baseUrl: document.querySelector('meta[name="moonshine-base"]')?.content || DEFAULT_MOONSHINE_BASE,
+      onStatus: (text) => { if (localDictation === dictation) $("agent_voice_status").textContent = text; },
+      onState: (state) => {
+        if (localDictation !== dictation) return;
+        if (state === "listening") {
+          button.textContent = "■ Stop dictation";
+          button.setAttribute("aria-label", "Stop voice dictation");
+          button.setAttribute("aria-pressed", "true");
+          button.classList.add("listening");
+          field.focus();
+        } else if (state === "stopped") {
+          localDictation = null;
+          clearVoiceButton();
+        }
+      },
+      onText: (spoken) => {
+        if (localDictation !== dictation || agentBusy) return;
+        voiceBaseText = [voiceBaseText, spoken].filter(Boolean).join(" ");
+        field.value = voiceBaseText.slice(0, 2000);
+        $("agent_voice_status").textContent = "Dictated text is in the prompt. Review it, then press Enter or Run.";
+        field.setSelectionRange(field.value.length, field.value.length);
+      },
+    });
+    localDictation = dictation;
+    button.textContent = "… Preparing voice";
+    button.setAttribute("aria-busy", "true");
+    dictation.start().then(() => {
+      button.removeAttribute("aria-busy");
+    }).catch((error) => {
+      button.removeAttribute("aria-busy");
+      if (localDictation === dictation) localDictation = null;
+      clearVoiceButton();
+      $("agent_voice_status").textContent = microphoneMessage(error);
+    });
+  }
+
   $("agent_voice").onclick = () => {
-    if (agentBusy || !SpeechRecognition) return;
+    if (agentBusy || !voiceAvailable) return;
+    if (localDictation) {
+      const local = localDictation;
+      localDictation = null;
+      local.stop();
+      clearVoiceButton();
+      $("agent_voice_status").textContent = "Dictation stopped.";
+      return;
+    }
     if (voiceRecognition) {
       voiceRecognition.stop();
       $("agent_voice_status").textContent = "Finishing dictation…";
       return;
     }
+    if (voiceMode === "local") { startLocalDictation(); return; }
     const recognition = new SpeechRecognition();
     voiceRecognition = recognition;
     const field = $("agent_goal");
@@ -488,6 +559,19 @@ import { nextWindowsPrompt } from "./agent-prompts.mjs";
     };
     recognition.onerror = event => {
       if (voiceRecognition !== recognition) return;
+      if (shouldFallBack(event.error, canCapture)) {
+        // The vendor's speech service is blocked or unreachable (Brave, an
+        // offline network, an unsupported language). Dictation does not need
+        // it: carry on locally, and use the local engine from now on.
+        recognition.onresult = null;
+        recognition.onerror = null;
+        recognition.onend = null;
+        voiceRecognition = null;
+        voiceMode = "local";
+        $("agent_voice_status").textContent = "The browser speech service is unavailable. Switching to local voice recognition…";
+        startLocalDictation();
+        return;
+      }
       const messages = {
         "not-allowed": "Microphone access was denied. Allow microphone access for this site to dictate.",
         "service-not-allowed": "The browser speech service is unavailable.",
